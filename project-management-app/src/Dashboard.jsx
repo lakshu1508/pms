@@ -80,11 +80,11 @@ export default function Dashboard() {
       </div>
 
      {/* 📈 Live Metrics Control Deck */}
-<div style={styles.metricsBar}>
-  <div style={styles.metricCard}>💻 Velocity: <strong>{metrics.completion_rate}% Done</strong></div>
-  <div style={{...styles.metricCard, color: metrics.critical_count > 0 ? '#ef4444' : '#f3f4f6'}}>🚨 Critical Actions: <strong>{metrics.critical_count} Open</strong></div>
-</div>
-   
+      <div style={styles.metricsBar}>
+        <div style={styles.metricCard}>💻 Velocity: <strong>{metrics.completion_rate}% Done</strong></div>
+        <div style={{...styles.metricCard, color: metrics.critical_count > 0 ? '#ef4444' : '#f3f4f6'}}>🚨 Critical Actions: <strong>{metrics.critical_count} Open</strong></div>
+      </div>
+    
 
       <header style={styles.header}>
         <div>
@@ -102,9 +102,14 @@ export default function Dashboard() {
       <div style={styles.listContainer}>
         {employees.map(emp => (
           <EmployeeRow 
-            key={emp.id} employee={emp} currentRole={currentRole}
+            key={emp.id} 
+            employee={emp} 
+            currentRole={currentRole}
             tasks={tasks.filter(t => t.assignedTo === emp.id)}
-            moveTask={moveTask} deleteTask={deleteTask} addComment={addComment}
+            moveTask={moveTask} 
+            deleteTask={deleteTask} 
+            addComment={addComment}
+            onRefresh={fetchAllData} /* 👈 This link hooks the delete button refresh straight back to here */
           />
         ))}
       </div>
