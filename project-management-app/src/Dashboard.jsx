@@ -7,11 +7,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
 export default function Dashboard() {
   const [currentRole, setCurrentRole] = useState('employee');
-  const [employees, setEmployees] = useState(() => {
-    // 🧠 Pre-load from browser storage if it exists
-    const saved = localStorage.getItem('pms_employees');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [employees, setEmployees] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [metrics, setMetrics] = useState({ completion_rate: 0, critical_count: 0 });
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
@@ -19,23 +15,9 @@ export default function Dashboard() {
 
   const fetchAllData = async () => {
     try {
-      // Sync tasks and metrics from backend
       fetch(`${API_BASE_URL}/tasks`).then(res => res.json()).then(setTasks);
       fetch(`${API_BASE_URL}/metrics`).then(res => res.json()).then(setMetrics);
-      
-      // Fetch employees from server
-      const res = await fetch(`${API_BASE_URL}/employees`);
-      const serverEmployees = await res.json();
-      
-      const localSaved = localStorage.getItem('pms_employees');
-      if (!localSaved) {
-        // If browser has nothing saved yet, prime it with the server's defaults
-        setEmployees(serverEmployees);
-        localStorage.setItem('pms_employees', JSON.stringify(serverEmployees));
-      } else {
-        // Use browser's persistent list so additions/deletions survive server sleep cycles
-        setEmployees(JSON.parse(localSaved));
-      }
+      fetch(`${API_BASE_URL}/employees`).then(res => res.json()).then(setEmployees);
     } catch (err) {
       console.error("Sync error:", err);
     }
@@ -84,30 +66,17 @@ export default function Dashboard() {
 
   const addEmployee = async (name, customId, avatar) => {
     const formattedId = customId.toUpperCase().trim();
-    const newEmp = { id: formattedId, name, avatar };
-
-    // 1. Try passing to backend
-    try {
-      await fetch(`${API_BASE_URL}/employees`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newEmp)
-      });
-    } catch(e) { console.log("Server asleep, saving locally first"); }
-
-    // 2. Save securely to browser hard drive
-    const updatedList = [...employees, newEmp];
-    setEmployees(updatedList);
-    localStorage.setItem('pms_employees', JSON.stringify(updatedList));
-
+    await fetch(`${API_BASE_URL}/employees`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: formattedId, name, avatar })
+    });
     setIsEmpModalOpen(false);
     fetchAllData();
   };
 
-  // Handle local UI deletion if server refreshes its defaults
-  const handleLocalDelete = (employeeId) => {
-    const updatedList = employees.filter(emp => emp.id !== employeeId);
-    setEmployees(updatedList);
-    localStorage.setItem('pms_employees', JSON.stringify(updatedList));
+  const deleteEmployee = async (employeeId) => {
+    await fetch(`${API_BASE_URL}/employees/${employeeId}`, { method: 'DELETE' });
+    fetchAllData();
   };
 
   return (
@@ -146,7 +115,7 @@ export default function Dashboard() {
             moveTask={moveTask} 
             deleteTask={deleteTask} 
             addComment={addComment}
-            onRefresh={() => { handleLocalDelete(emp.id); fetchAllData(); }}
+            onDelete={() => deleteEmployee(emp.id)}
           />
         ))}
       </div>
