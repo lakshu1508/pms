@@ -30,15 +30,16 @@ export default function EmployeeRow({ employee, tasks, currentRole, moveTask, de
         <div>
           <h3 style={styles.name}>{employee.name}</h3>
           <span style={styles.idBadge}>{employee.id}</span>
-          
-          {/* ❌ NEW DELETE BUTTON */}
-          <button 
-            onClick={handleDeleteEmployee}
-            style={styles.deleteButton}
-            title="Delete Employee"
-          >
-            🗑️ Delete
-          </button>
+          {/* ❌ NEW DELETE BUTTON - ONLY VISIBLE TO ADMINS */}
+{currentRole === 'admin' && (
+  <button 
+    onClick={handleDeleteEmployee}
+    style={styles.deleteButton}
+    title="Delete Employee"
+  >
+    🗑️ Delete
+  </button>
+)}
         </div>
         <div style={styles.workloadCounter}>Workload: <strong>{tasks.length}</strong></div>
       </div>
