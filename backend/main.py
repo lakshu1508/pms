@@ -89,11 +89,28 @@ def get_dashboard_metrics():
 def get_employees():
     return load_data()["employees"]
 
+# 👤 ONBOARD EMPLOYEE
 @app.post("/api/employees")
+def create_employee(employee: EmployeeCreate):
+    db = load_data()
+    
+    # Check if ID already exists
+    if any(e["id"] == employee.id.upper().strip() for e in db["employees"]):
+        raise HTTPException(status_code=400, detail="Employee ID already exists")
+        
+    new_emp = {
+        "id": employee.id.upper().strip(),
+        "name": employee.name,
+        "avatar": employee.avatar
+    }
+    db["employees"].append(new_emp)
+    save_data(db)
+    return new_emp
+
+# 🗑️ DELETE EMPLOYEE
 @app.delete("/api/employees/{employee_id}")
 def delete_employee(employee_id: str):
     db = load_data()
-    # Filter out the employee with the matching ID
     original_count = len(db["employees"])
     db["employees"] = [e for e in db["employees"] if e["id"] != employee_id]
     
@@ -102,12 +119,6 @@ def delete_employee(employee_id: str):
         
     save_data(db)
     return {"message": "Employee deleted successfully"}
-def create_employee(employee: EmployeeCreate):
-    db = load_data()
-    new_emp = employee.dict()
-    db["employees"].append(new_emp)
-    save_data(db)
-    return new_emp
 
 # 📡 TASKS & OPERATIONS
 @app.get("/api/tasks")
