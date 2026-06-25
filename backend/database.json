@@ -1,0 +1,46 @@
+{
+    "employees": [
+        {
+            "id": "EMP-101",
+            "name": "Sarah Connor",
+            "avatar": "\ud83d\udc69\u200d\ud83d\udcbb"
+        },
+        {
+            "id": "EMP-102",
+            "name": "Alex Mercer",
+            "avatar": "\ud83d\udc68\u200d\ud83d\udcbb"
+        },
+        {
+            "id": "EMP-103",
+            "name": "Elena Rostova",
+            "avatar": "\ud83d\udc69\u200d\ud83d\udd2c"
+        },
+        {
+            "id": "104",
+            "name": "lux",
+            "avatar": "\ud83d\udc69\u200d\ud83d\udcbc"
+        }
+    ],
+    "tasks": [
+        {
+            "id": "demo-task-1",
+            "title": "Database Optimization Sync",
+            "description": "Index user records and clear stale query cache structures.",
+            "status": "in-progress",
+            "assignedTo": "EMP-101",
+            "priority": "High",
+            "due_date": "2026-07-15",
+            "comments": []
+        },
+        {
+            "title": "gpt",
+            "description": "explore",
+            "status": "todo",
+            "assignedTo": "104",
+            "priority": "Low",
+            "due_date": "2026-06-26",
+            "id": "5cafb9d8-6197-4852-9dd5-985b8e5944b0",
+            "comments": []
+        }
+    ]
+}
