@@ -90,6 +90,18 @@ def get_employees():
     return load_data()["employees"]
 
 @app.post("/api/employees")
+@app.delete("/api/employees/{employee_id}")
+def delete_employee(employee_id: str):
+    db = load_data()
+    # Filter out the employee with the matching ID
+    original_count = len(db["employees"])
+    db["employees"] = [e for e in db["employees"] if e["id"] != employee_id]
+    
+    if len(db["employees"]) == original_count:
+        raise HTTPException(status_code=404, detail="Employee not found")
+        
+    save_data(db)
+    return {"message": "Employee deleted successfully"}
 def create_employee(employee: EmployeeCreate):
     db = load_data()
     new_emp = employee.dict()
