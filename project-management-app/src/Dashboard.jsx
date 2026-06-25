@@ -3,21 +3,42 @@ import EmployeeRow from './EmployeeRow';
 import AddTaskModal from './AddTaskModal';
 import AddEmployeeModal from './AddEmployeeModal';
 
-// Replace your old API_BASE_URL line with this:
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export default function Dashboard() {
   const [currentRole, setCurrentRole] = useState('employee');
-  const [employees, setEmployees] = useState([]);
+  const [employees, setEmployees] = useState(() => {
+    // 🧠 Pre-load from browser storage if it exists
+    const saved = localStorage.getItem('pms_employees');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [tasks, setTasks] = useState([]);
   const [metrics, setMetrics] = useState({ completion_rate: 0, critical_count: 0 });
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isEmpModalOpen, setIsEmpModalOpen] = useState(false);
 
-  const fetchAllData = () => {
-    fetch(`${API_BASE_URL}/employees`).then(res => res.json()).then(setEmployees);
-    fetch(`${API_BASE_URL}/tasks`).then(res => res.json()).then(setTasks);
-    fetch(`${API_BASE_URL}/metrics`).then(res => res.json()).then(setMetrics);
+  const fetchAllData = async () => {
+    try {
+      // Sync tasks and metrics from backend
+      fetch(`${API_BASE_URL}/tasks`).then(res => res.json()).then(setTasks);
+      fetch(`${API_BASE_URL}/metrics`).then(res => res.json()).then(setMetrics);
+      
+      // Fetch employees from server
+      const res = await fetch(`${API_BASE_URL}/employees`);
+      const serverEmployees = await res.json();
+      
+      const localSaved = localStorage.getItem('pms_employees');
+      if (!localSaved) {
+        // If browser has nothing saved yet, prime it with the server's defaults
+        setEmployees(serverEmployees);
+        localStorage.setItem('pms_employees', JSON.stringify(serverEmployees));
+      } else {
+        // Use browser's persistent list so additions/deletions survive server sleep cycles
+        setEmployees(JSON.parse(localSaved));
+      }
+    } catch (err) {
+      console.error("Sync error:", err);
+    }
   };
 
   useEffect(() => { fetchAllData(); }, []);
@@ -35,7 +56,7 @@ export default function Dashboard() {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus })
     });
-    fetchAllData(); // Refresh calculations instantly
+    fetchAllData();
   };
 
   const addTask = async (title, description, assignedTo, status, priority, due_date) => {
@@ -62,29 +83,45 @@ export default function Dashboard() {
   };
 
   const addEmployee = async (name, customId, avatar) => {
-    await fetch(`${API_BASE_URL}/employees`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: customId.toUpperCase().trim(), name, avatar })
-    });
+    const formattedId = customId.toUpperCase().trim();
+    const newEmp = { id: formattedId, name, avatar };
+
+    // 1. Try passing to backend
+    try {
+      await fetch(`${API_BASE_URL}/employees`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newEmp)
+      });
+    } catch(e) { console.log("Server asleep, saving locally first"); }
+
+    // 2. Save securely to browser hard drive
+    const updatedList = [...employees, newEmp];
+    setEmployees(updatedList);
+    localStorage.setItem('pms_employees', JSON.stringify(updatedList));
+
     setIsEmpModalOpen(false);
     fetchAllData();
   };
 
+  // Handle local UI deletion if server refreshes its defaults
+  const handleLocalDelete = (employeeId) => {
+    const updatedList = employees.filter(emp => emp.id !== employeeId);
+    setEmployees(updatedList);
+    localStorage.setItem('pms_employees', JSON.stringify(updatedList));
+  };
+
   return (
     <div style={styles.dashboardContainer}>
-      {/* 🔐 Access Switcher */}
       <div style={styles.roleBar}>
         <span style={styles.roleLabel}>🔑 Clearance Scope:</span>
         <button style={{ ...styles.roleTab, backgroundColor: currentRole === 'admin' ? '#6366f1' : '#1f2937' }} onClick={() => handleRoleChange('admin')}>👑 Admin Mode</button>
         <button style={{ ...styles.roleTab, backgroundColor: currentRole === 'employee' ? '#10b981' : '#1f2937' }} onClick={() => handleRoleChange('employee')}>🛠️ Employee Mode</button>
       </div>
 
-     {/* 📈 Live Metrics Control Deck */}
       <div style={styles.metricsBar}>
         <div style={styles.metricCard}>💻 Velocity: <strong>{metrics.completion_rate}% Done</strong></div>
         <div style={{...styles.metricCard, color: metrics.critical_count > 0 ? '#ef4444' : '#f3f4f6'}}>🚨 Critical Actions: <strong>{metrics.critical_count} Open</strong></div>
       </div>
-    
 
       <header style={styles.header}>
         <div>
@@ -109,7 +146,7 @@ export default function Dashboard() {
             moveTask={moveTask} 
             deleteTask={deleteTask} 
             addComment={addComment}
-            onRefresh={fetchAllData} /* 👈 This link hooks the delete button refresh straight back to here */
+            onRefresh={() => { handleLocalDelete(emp.id); fetchAllData(); }}
           />
         ))}
       </div>
