@@ -6,7 +6,16 @@ import AddEmployeeModal from './AddEmployeeModal';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export default function Dashboard() {
-  const [currentRole, setCurrentRole] = useState('employee');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentRole, setCurrentRole] = useState(null); // 'admin' or 'employee'
+  const [loggedInEmployee, setLoggedInEmployee] = useState(null); // Holds the authed employee details
+  
+  // Login Form States
+  const [loginEmpId, setLoginEmpId] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+
+  // Master Data States
   const [employees, setEmployees] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [metrics, setMetrics] = useState({ completion_rate: 0, critical_count: 0 });
@@ -23,16 +32,57 @@ export default function Dashboard() {
     }
   };
 
-  useEffect(() => { fetchAllData(); }, []);
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchAllData();
+    }
+  }, [isAuthenticated]);
 
-  const handleRoleChange = (targetRole) => {
-    if (targetRole === 'admin') {
-      const pinInput = prompt('🛡️ Enter Admin Passkey PIN:');
-      if (pinInput === '1234') { setCurrentRole('admin'); alert('✅ Access Granted.'); }
-      else if (pinInput !== null) alert('❌ Access Denied!');
-    } else { setCurrentRole('employee'); }
+  // Handle Selection Screen
+  const selectAdminRole = () => {
+    const pinInput = prompt('🛡️ Enter Admin Passkey PIN:');
+    if (pinInput === '1234') {
+      setCurrentRole('admin');
+      setIsAuthenticated(true);
+    } else if (pinInput !== null) {
+      alert('❌ Access Denied!');
+    }
   };
 
+  // Handle Employee Login Request
+  const handleEmployeeLogin = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/employee/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: loginEmpId.toUpperCase().trim(), password: loginPassword })
+      });
+      
+      const data = await response.json();
+      if (response.ok) {
+        setLoggedInEmployee(data.employee);
+        setCurrentRole('employee');
+        setIsAuthenticated(true);
+      } else {
+        setLoginError(data.detail || 'Invalid Login Details');
+      }
+    } catch (err) {
+      setLoginError('Could not reach backend server.');
+    }
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    setCurrentRole(null);
+    setLoggedInEmployee(null);
+    setLoginEmpId('');
+    setLoginPassword('');
+    setLoginError('');
+  };
+
+  // --- CRUD OPERATIONS ---
   const moveTask = async (taskId, newStatus) => {
     await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -56,7 +106,7 @@ export default function Dashboard() {
   };
 
   const addComment = async (taskId, text) => {
-    const author = currentRole === 'admin' ? "👑 Administrator" : "🛠️ Team Member";
+    const author = currentRole === 'admin' ? "👑 Administrator" : `🛠️ ${loggedInEmployee?.name || 'Team Member'}`;
     await fetch(`${API_BASE_URL}/tasks/${taskId}/comments`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ author, text })
@@ -79,23 +129,82 @@ export default function Dashboard() {
     fetchAllData();
   };
 
+  // --- RENDERING VIEWS ---
+
+  // SCREEN 1: Welcome / Role Selection Portal Screen
+  if (!currentRole) {
+    return (
+      <div style={styles.portalContainer}>
+        <div style={styles.portalCard}>
+          <h1 style={styles.portalTitle}>Business Management Suite</h1>
+          <p style={styles.portalSubtitle}>Please select your clearance path to continue</p>
+          <div style={styles.portalGrid}>
+            <button style={styles.adminPortalBtn} onClick={selectAdminRole}>
+              <div style={{ fontSize: '40px' }}>👑</div>
+              <div style={styles.portalBtnTitle}>Admin Portal</div>
+              <div style={styles.portalBtnDesc}>Manage staff, distribute tasks, view company performance analytics.</div>
+            </button>
+            <button style={styles.empPortalBtn} onClick={() => setCurrentRole('employee_login')}>
+              <div style={{ fontSize: '40px' }}>🛠️</div>
+              <div style={styles.portalBtnTitle}>Employee Portal</div>
+              <div style={styles.portalBtnDesc}>Access your personal private workspace and manage ongoing jobs.</div>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // SCREEN 2: Secure Employee Login Form Screen
+  if (currentRole === 'employee_login') {
+    return (
+      <div style={styles.portalContainer}>
+        <div style={styles.loginCard}>
+          <button style={styles.backLink} onClick={() => setCurrentRole(null)}>⬅️ Back to Portal Selection</button>
+          <h2 style={{ ...styles.portalTitle, fontSize: '24px', marginTop: '15px' }}>Employee Log In</h2>
+          <p style={{ ...styles.portalSubtitle, marginBottom: '25px' }}>Enter your credentials to securely retrieve your task sheet.</p>
+          
+          <form onSubmit={handleEmployeeLogin} style={styles.form}>
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Employee ID Code</label>
+              <input type="text" placeholder="e.g. EMP-101" value={loginEmpId} onChange={(e) => setLoginEmpId(e.target.value)} style={styles.input} required />
+            </div>
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Security Password</label>
+              <input type="password" placeholder="Defaults to Employee ID if unset" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} style={styles.input} required />
+            </div>
+            {loginError && <div style={styles.errorBanner}>⚠️ {loginError}</div>}
+            <button type="submit" style={styles.loginSubmitBtn}>Verify Credentials & Enter</button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // SCREEN 3: Active Dashboard (Filtered uniquely based on Authenticated Identity)
   return (
     <div style={styles.dashboardContainer}>
       <div style={styles.roleBar}>
-        <span style={styles.roleLabel}>🔑 Clearance Scope:</span>
-        <button style={{ ...styles.roleTab, backgroundColor: currentRole === 'admin' ? '#6366f1' : '#1f2937' }} onClick={() => handleRoleChange('admin')}>👑 Admin Mode</button>
-        <button style={{ ...styles.roleTab, backgroundColor: currentRole === 'employee' ? '#10b981' : '#1f2937' }} onClick={() => handleRoleChange('employee')}>🛠️ Employee Mode</button>
+        <span style={styles.roleLabel}>🔐 Authenticated Context:</span>
+        <span style={styles.statusBadge}>
+          {currentRole === 'admin' ? '👑 SYSTEM ADMINISTRATOR' : `🛠️ PRIVACY ISOLATED WORKSPACE (${loggedInEmployee?.id})`}
+        </span>
+        <button style={styles.logoutBtn} onClick={handleLogout}>🚪 Sign Out</button>
       </div>
 
-      <div style={styles.metricsBar}>
-        <div style={styles.metricCard}>💻 Velocity: <strong>{metrics.completion_rate}% Done</strong></div>
-        <div style={{...styles.metricCard, color: metrics.critical_count > 0 ? '#ef4444' : '#f3f4f6'}}>🚨 Critical Actions: <strong>{metrics.critical_count} Open</strong></div>
-      </div>
+      {currentRole === 'admin' && (
+        <div style={styles.metricsBar}>
+          <div style={styles.metricCard}>💻 Velocity: <strong>{metrics.completion_rate}% Done</strong></div>
+          <div style={{...styles.metricCard, color: metrics.critical_count > 0 ? '#ef4444' : '#f3f4f6'}}>🚨 Critical Actions: <strong>{metrics.critical_count} Open</strong></div>
+        </div>
+      )}
 
       <header style={styles.header}>
         <div>
           <h1 style={styles.title}>Project Management Portal</h1>
-          <p style={styles.subtitle}>System scope mapped as: <strong>{currentRole.toUpperCase()}</strong></p>
+          <p style={styles.subtitle}>
+            Welcome back, <strong>{currentRole === 'admin' ? 'Administrator' : loggedInEmployee?.name}</strong>
+          </p>
         </div>
         {currentRole === 'admin' && (
           <div style={styles.btnGroup}>
@@ -106,18 +215,35 @@ export default function Dashboard() {
       </header>
 
       <div style={styles.listContainer}>
-        {employees.map(emp => (
-          <EmployeeRow 
-            key={emp.id} 
-            employee={emp} 
-            currentRole={currentRole}
-            tasks={tasks.filter(t => t.assignedTo === emp.id)}
-            moveTask={moveTask} 
-            deleteTask={deleteTask} 
-            addComment={addComment}
-            onDelete={() => deleteEmployee(emp.id)}
-          />
-        ))}
+        {currentRole === 'admin' ? (
+          // Admin View: Maps all registered staff rows
+          employees.map(emp => (
+            <EmployeeRow 
+              key={emp.id} 
+              employee={emp} 
+              currentRole={currentRole}
+              tasks={tasks.filter(t => t.assignedTo === emp.id)}
+              moveTask={moveTask} 
+              deleteTask={deleteTask} 
+              addComment={addComment}
+              onDelete={() => deleteEmployee(emp.id)}
+            />
+          ))
+        ) : (
+          // Employee View: Maps ONLY their own card context safely
+          employees.filter(emp => emp.id === loggedInEmployee?.id).map(emp => (
+            <EmployeeRow 
+              key={emp.id} 
+              employee={emp} 
+              currentRole={currentRole}
+              tasks={tasks.filter(t => t.assignedTo === emp.id)}
+              moveTask={moveTask} 
+              deleteTask={deleteTask} 
+              addComment={addComment}
+              onDelete={null} // Employees can never self-delete
+            />
+          ))
+        )}
       </div>
 
       {isTaskModalOpen && <AddTaskModal employees={employees} onSave={addTask} onClose={() => setIsTaskModalOpen(false)} />}
@@ -127,10 +253,28 @@ export default function Dashboard() {
 }
 
 const styles = {
+  portalContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', backgroundColor: '#05070f', fontFamily: '"Inter", sans-serif', padding: '20px' },
+  portalCard: { maxWidth: '800px', width: '100%', textAlign: 'center' },
+  portalTitle: { fontSize: '32px', fontWeight: '800', margin: '0 0 8px 0', background: 'linear-gradient(90deg, #6366f1, #a855f7)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  portalSubtitle: { color: '#9ca3af', fontSize: '15px', margin: '0 0 40px 0' },
+  portalGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' },
+  adminPortalBtn: { padding: '30px', backgroundColor: '#0b0f19', border: '2px solid #312e81', borderRadius: '12px', color: '#fff', cursor: 'pointer', textAlign: 'center', transition: 'transform 0.2s', ':hover': { transform: 'scale(1.02)' } },
+  empPortalBtn: { padding: '30px', backgroundColor: '#0b0f19', border: '2px solid #064e3b', borderRadius: '12px', color: '#fff', cursor: 'pointer', textAlign: 'center', transition: 'transform 0.2s', ':hover': { transform: 'scale(1.02)' } },
+  portalBtnTitle: { fontSize: '18px', fontWeight: '700', margin: '15px 0 8px 0' },
+  portalBtnDesc: { fontSize: '13px', color: '#9ca3af', lineHeight: '1.5' },
+  loginCard: { backgroundColor: '#0b0f19', border: '1px solid #1f2937', padding: '40px', borderRadius: '16px', maxWidth: '400px', width: '100%' },
+  backLink: { background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', fontSize: '13px', padding: 0, fontWeight: '500' },
+  form: { display: 'flex', flexDirection: 'column', gap: '20px' },
+  inputGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  label: { fontSize: '12px', color: '#9ca3af', fontWeight: '600', textTransform: 'uppercase' },
+  input: { padding: '12px', backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', color: '#fff', fontSize: '14px' },
+  loginSubmitBtn: { padding: '12px', backgroundColor: '#6366f1', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', marginTop: '10px' },
+  errorBanner: { padding: '10px', backgroundColor: '#7f1d1d', border: '1px solid #f87171', color: '#fca5a5', borderRadius: '6px', fontSize: '13px' },
   dashboardContainer: { padding: '40px', fontFamily: '"Inter", sans-serif', backgroundColor: '#0b0f19', color: '#f3f4f6', minHeight: '100vh' },
-  roleBar: { display: 'flex', gap: '10px', alignItems: 'center', backgroundColor: '#111827', padding: '12px 20px', borderRadius: '8px', border: '1px solid #1f2937', marginBottom: '15px' },
+  roleBar: { display: 'flex', gap: '15px', alignItems: 'center', backgroundColor: '#111827', padding: '12px 20px', borderRadius: '8px', border: '1px solid #1f2937', marginBottom: '30px' },
   roleLabel: { fontSize: '13px', color: '#9ca3af', fontWeight: '500' },
-  roleTab: { padding: '8px 14px', border: 'none', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
+  statusBadge: { fontSize: '12px', fontWeight: '700', color: '#38bdf8', letterSpacing: '0.5px' },
+  logoutBtn: { marginLeft: 'auto', padding: '6px 12px', backgroundColor: '#1f2937', color: '#f3f4f6', border: '1px solid #374151', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' },
   metricsBar: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '15px', marginBottom: '30px' },
   metricCard: { backgroundColor: '#111827', border: '1px solid #1f2937', padding: '15px', borderRadius: '8px', fontSize: '14px', textAlign: 'center' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px', borderBottom: '1px solid #1f2937', paddingBottom: '24px' },
