@@ -6,9 +6,17 @@ import AddEmployeeModal from './AddEmployeeModal';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export default function Dashboard() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentRole, setCurrentRole] = useState(null); // 'admin' or 'employee'
-  const [loggedInEmployee, setLoggedInEmployee] = useState(null); // Holds the authed employee details
+  // 1. Initialize states directly from localStorage so refreshes don't wipe them
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return localStorage.getItem('isAuthenticated') === 'true';
+  });
+  const [currentRole, setCurrentRole] = useState(() => {
+    return localStorage.getItem('currentRole') || null;
+  });
+  const [loggedInEmployee, setLoggedInEmployee] = useState(() => {
+    const savedEmp = localStorage.getItem('loggedInEmployee');
+    return savedEmp ? JSON.parse(savedEmp) : null;
+  });
   
   // Login Form States
   const [loginEmpId, setLoginEmpId] = useState('');
@@ -44,6 +52,9 @@ export default function Dashboard() {
     if (pinInput === '1234') {
       setCurrentRole('admin');
       setIsAuthenticated(true);
+      // Save session tokens to browser storage
+      localStorage.setItem('isAuthenticated', 'true');
+      localStorage.setItem('currentRole', 'admin');
     } else if (pinInput !== null) {
       alert('❌ Access Denied!');
     }
@@ -65,6 +76,10 @@ export default function Dashboard() {
         setLoggedInEmployee(data.employee);
         setCurrentRole('employee');
         setIsAuthenticated(true);
+        // Save session tokens to browser storage
+        localStorage.setItem('isAuthenticated', 'true');
+        localStorage.setItem('currentRole', 'employee');
+        localStorage.setItem('loggedInEmployee', JSON.stringify(data.employee));
       } else {
         setLoginError(data.detail || 'Invalid Login Details');
       }
@@ -80,6 +95,8 @@ export default function Dashboard() {
     setLoginEmpId('');
     setLoginPassword('');
     setLoginError('');
+    // Clear everything from storage on explicit sign out
+    localStorage.clear();
   };
 
   // --- CRUD OPERATIONS ---
@@ -132,7 +149,7 @@ export default function Dashboard() {
   // --- RENDERING VIEWS ---
 
   // SCREEN 1: Welcome / Role Selection Portal Screen
-  if (!currentRole) {
+  if (!isAuthenticated || !currentRole) {
     return (
       <div style={styles.portalContainer}>
         <div style={styles.portalCard}>
@@ -144,7 +161,7 @@ export default function Dashboard() {
               <div style={styles.portalBtnTitle}>Admin Portal</div>
               <div style={styles.portalBtnDesc}>Manage staff, distribute tasks, view company performance analytics.</div>
             </button>
-            <button style={styles.empPortalBtn} onClick={() => setCurrentRole('employee_login')}>
+            <button style={styles.empPortalBtn} onClick={() => { setCurrentRole('employee_login'); setIsAuthenticated(false); }}>
               <div style={{ fontSize: '40px' }}>🛠️</div>
               <div style={styles.portalBtnTitle}>Employee Portal</div>
               <div style={styles.portalBtnDesc}>Access your personal private workspace and manage ongoing jobs.</div>
@@ -216,7 +233,6 @@ export default function Dashboard() {
 
       <div style={styles.listContainer}>
         {currentRole === 'admin' ? (
-          // Admin View: Maps all registered staff rows
           employees.map(emp => (
             <EmployeeRow 
               key={emp.id} 
@@ -230,7 +246,6 @@ export default function Dashboard() {
             />
           ))
         ) : (
-          // Employee View: Maps ONLY their own card context safely
           employees.filter(emp => emp.id === loggedInEmployee?.id).map(emp => (
             <EmployeeRow 
               key={emp.id} 
@@ -240,7 +255,7 @@ export default function Dashboard() {
               moveTask={moveTask} 
               deleteTask={deleteTask} 
               addComment={addComment}
-              onDelete={null} // Employees can never self-delete
+              onDelete={null}
             />
           ))
         )}
