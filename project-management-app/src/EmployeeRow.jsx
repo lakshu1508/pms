@@ -7,9 +7,7 @@ export default function EmployeeRow({ employee, tasks, currentRole, moveTask, de
     let nextStatus = "TODO";
     if (currentStatus === "TODO") nextStatus = "IN_PROGRESS";
     else if (currentStatus === "IN_PROGRESS") nextStatus = "DONE";
-    else if (currentStatus === "DONE") nextStatus = "TODO"; // loops back round
-
-    // Trigger update handler
+    else if (currentStatus === "DONE") nextStatus = "TODO";
     moveTask(taskId, nextStatus);
   };
 
@@ -23,88 +21,84 @@ export default function EmployeeRow({ employee, tasks, currentRole, moveTask, de
   };
 
   return (
-    <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '12px', padding: '24px', marginBottom: '20px' }}>
+    // Max-width restriction added here keeps the rows contained and balanced
+    <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '12px', padding: '16px', marginBottom: '15px', maxWidth: '900px', margin: '0 auto 15px auto' }}>
       
-      {/* Employee Info Section */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', borderBottom: '1px solid #1f2937', paddingBottom: '15px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <img src={employee.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"} alt="avatar" style={{ width: '45px', height: '45px', borderRadius: '50%' }} />
+      {/* Employee Header Info (Compact Heights) */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', borderBottom: '1px solid #1f2937', paddingBottom: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <img src={employee.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"} alt="avatar" style={{ width: '36px', height: '36px', borderRadius: '50%' }} />
           <div>
-            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#f3f4f6' }}>{employee.name}</h3>
-            <span style={{ fontSize: '12px', color: '#6366f1', fontWeight: '600' }}>ID Code: {employee.id}</span>
+            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '600', color: '#f3f4f6' }}>{employee.name}</h3>
+            <span style={{ fontSize: '11px', color: '#6366f1', fontWeight: '600' }}>ID: {employee.id}</span>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-          <span style={{ fontSize: '13px', color: '#9ca3af' }}>Active Assignments: <strong>{tasks.length}</strong></span>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <span style={{ fontSize: '12px', color: '#9ca3af' }}>Tasks: <strong>{tasks.length}</strong></span>
           {currentRole === 'admin' && onDelete && (
-            <button onClick={onDelete} style={{ backgroundColor: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>🗑️ Offboard</button>
+            <button onClick={onDelete} style={{ backgroundColor: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '12px', fontWeight: '600', padding: 0 }}>🗑️ Offboard</button>
           )}
         </div>
       </div>
 
-      {/* Embedded Task List Grid View */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '15px' }}>
+      {/* Grid Layout Container */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
         {tasks.map(task => {
-          const normStatus = str(task.status).upper();
+          const normStatus = String(task.status || '').toUpperCase().trim() || 'TODO';
           return (
-            <div key={task.id} style={{ backgroundColor: '#1f2937', borderRadius: '8px', padding: '16px', borderLeft: normStatus === 'DONE' ? '4px solid #10b981' : '4px solid #3b82f6' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                <span style={{ fontSize: '11px', fontWeight: '700', backgroundColor: '#374151', padding: '2px 6px', borderRadius: '4px', color: '#f59e0b' }}>⚠️ {task.priority}</span>
-                <span style={{ fontSize: '12px', color: '#9ca3af' }}>📅 {task.due_date}</span>
-              </div>
-              <h4 style={{ margin: '0 0 6px 0', fontSize: '16px', color: '#fff' }}>{task.title}</h4>
-              <p style={{ margin: '0 0 15px 0', fontSize: '13px', color: '#9ca3af', lineHeight: '1.4' }}>{task.description}</p>
-              
-              {/* Interactive Status Bar Actions */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#111827', padding: '8px 12px', borderRadius: '6px', marginBottom: '15px' }}>
-                <span style={{ fontSize: '12px', fontWeight: '700', color: normStatus === 'DONE' ? '#10b981' : '#38bdf8' }}>
-                  {normStatus}
-                </span>
-                <button 
-                  onClick={() => handleStatusCycle(task.id, normStatus)}
-                  style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '14px' }}
-                  title="Cycle Task Status"
-                >
-                  ▶️ Change
-                </button>
-              </div>
-
-              {/* Comments Read Feed Block */}
-              <div style={{ borderTop: '1px solid #374151', paddingTop: '10px' }}>
-                <span style={{ fontSize: '11px', color: '#9ca3af', fontWeight: '600' }}>💬 Discussion Thread ({task.comments?.length || 0}):</span>
-                <div style={{ maxHeight: '80px', overflowY: 'auto', margin: '5px 0' }}>
-                  {task.comments?.map((c, idx) => (
-                    <div key={idx} style={{ fontSize: '12px', marginBottom: '4px', color: '#d1d5db' }}>
-                      <strong style={{ color: '#fff' }}>{c.author}:</strong> {c.text}
-                    </div>
-                  ))}
+            <div key={task.id} style={{ backgroundColor: '#1f2937', borderRadius: '8px', padding: '12px', borderLeft: normStatus === 'DONE' ? '4px solid #10b981' : '4px solid #3b82f6', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '10px', fontWeight: '700', backgroundColor: '#374151', padding: '1px 5px', borderRadius: '4px', color: '#f59e0b' }}>⚠️ {task.priority}</span>
+                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>📅 {task.due_date}</span>
                 </div>
-                <form onSubmit={(e) => handleCommentSubmit(e, task.id)} style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-                  <input 
-                    type="text" 
-                    placeholder="Write a message..." 
-                    value={commentTexts[task.id] || ''} 
-                    onChange={(e) => setCommentTexts({ ...commentTexts, [task.id]: e.target.value })}
-                    style={{ flexGrow: 1, backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '4px', padding: '6px', color: '#fff', fontSize: '12px' }}
-                  />
-                  <button type="submit" style={{ backgroundColor: '#6366f1', color: '#fff', border: 'none', borderRadius: '4px', padding: '0 10px', fontSize: '12px', cursor: 'pointer' }}>Send</button>
-                </form>
+                <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', color: '#fff' }}>{task.title}</h4>
+                <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#9ca3af', lineHeight: '1.3' }}>{task.description}</p>
               </div>
+              
+              <div>
+                {/* Action Controls */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#111827', padding: '6px 10px', borderRadius: '6px', marginBottom: '10px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: '700', color: normStatus === 'DONE' ? '#10b981' : '#38bdf8' }}>
+                    {normStatus}
+                  </span>
+                  <button 
+                    onClick={() => handleStatusCycle(task.id, normStatus)}
+                    style={{ background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', padding: 0 }}
+                  >
+                    ▶️ Change
+                  </button>
+                </div>
 
-              {currentRole === 'admin' && (
-                <button onClick={() => deleteTask(task.id)} style={{ backgroundColor: 'transparent', border: 'none', color: '#ef4444', fontSize: '12px', cursor: 'pointer', marginTop: '10px', padding: 0 }}>❌ Remove Task</button>
-              )}
+                {/* Compact Comments Feed */}
+                <div style={{ borderTop: '1px solid #374151', paddingTop: '8px' }}>
+                  <div style={{ maxHeight: '60px', overflowY: 'auto', marginBottom: '4px' }}>
+                    {task.comments?.map((c, idx) => (
+                      <div key={idx} style={{ fontSize: '11px', marginBottom: '2px', color: '#d1d5db' }}>
+                        <strong style={{ color: '#fff' }}>{c.author}:</strong> {c.text}
+                      </div>
+                    ))}
+                  </div>
+                  <form onSubmit={(e) => handleCommentSubmit(e, task.id)} style={{ display: 'flex', gap: '4px' }}>
+                    <input 
+                      type="text" 
+                      placeholder="Comment..." 
+                      value={commentTexts[task.id] || ''} 
+                      onChange={(e) => setCommentTexts({ ...commentTexts, [task.id]: e.target.value })}
+                      style={{ flexGrow: 1, backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '4px', padding: '4px 6px', color: '#fff', fontSize: '11px' }}
+                    />
+                    <button type="submit" style={{ backgroundColor: '#6366f1', color: '#fff', border: 'none', borderRadius: '4px', padding: '0 8px', fontSize: '11px', cursor: 'pointer' }}>Send</button>
+                  </form>
+                </div>
+
+                {currentRole === 'admin' && (
+                  <button onClick={() => deleteTask(task.id)} style={{ backgroundColor: 'transparent', border: 'none', color: '#ef4444', fontSize: '11px', cursor: 'pointer', marginTop: '8px', padding: 0 }}>❌ Remove Task</button>
+                )}
+              </div>
             </div>
           );
         })}
       </div>
     </div>
   );
-}
-
-// Simple Helper injection for safety styling fallback properties
-function str(val) {
-  return {
-    upper: () => String(val || '').toUpperCase().trim()
-  };
 }
