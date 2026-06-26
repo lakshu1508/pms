@@ -6,7 +6,7 @@ import AddEmployeeModal from './AddEmployeeModal';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export default function Dashboard() {
-  // 1. Initialize states directly from localStorage so refreshes don't wipe them
+  // Initialize states directly from localStorage so refreshes don't wipe them
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return localStorage.getItem('isAuthenticated') === 'true';
   });
@@ -52,7 +52,6 @@ export default function Dashboard() {
     if (pinInput === '1234') {
       setCurrentRole('admin');
       setIsAuthenticated(true);
-      // Save session tokens to browser storage
       localStorage.setItem('isAuthenticated', 'true');
       localStorage.setItem('currentRole', 'admin');
     } else if (pinInput !== null) {
@@ -76,7 +75,6 @@ export default function Dashboard() {
         setLoggedInEmployee(data.employee);
         setCurrentRole('employee');
         setIsAuthenticated(true);
-        // Save session tokens to browser storage
         localStorage.setItem('isAuthenticated', 'true');
         localStorage.setItem('currentRole', 'employee');
         localStorage.setItem('loggedInEmployee', JSON.stringify(data.employee));
@@ -95,7 +93,6 @@ export default function Dashboard() {
     setLoginEmpId('');
     setLoginPassword('');
     setLoginError('');
-    // Clear everything from storage on explicit sign out
     localStorage.clear();
   };
 
@@ -111,7 +108,7 @@ export default function Dashboard() {
   const addTask = async (title, description, assignedTo, status, priority, due_date) => {
     await fetch(`${API_BASE_URL}/tasks`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, description, assignedTo, status, priority, due_date })
+      body: JSON.stringify({ title, description, assigned_to: assignedTo, status, priority, due_date })
     });
     setIsTaskModalOpen(false);
     fetchAllData();
@@ -149,7 +146,7 @@ export default function Dashboard() {
   // --- RENDERING VIEWS ---
 
   // SCREEN 1: Welcome / Role Selection Portal Screen
-  if (!isAuthenticated || !currentRole) {
+  if (!isAuthenticated && currentRole !== 'employee_login') {
     return (
       <div style={styles.portalContainer}>
         <div style={styles.portalCard}>
@@ -161,7 +158,7 @@ export default function Dashboard() {
               <div style={styles.portalBtnTitle}>Admin Portal</div>
               <div style={styles.portalBtnDesc}>Manage staff, distribute tasks, view company performance analytics.</div>
             </button>
-            <button style={styles.empPortalBtn} onClick={() => { setCurrentRole('employee_login'); setIsAuthenticated(false); }}>
+            <button style={styles.empPortalBtn} onClick={() => setCurrentRole('employee_login')}>
               <div style={{ fontSize: '40px' }}>🛠️</div>
               <div style={styles.portalBtnTitle}>Employee Portal</div>
               <div style={styles.portalBtnDesc}>Access your personal private workspace and manage ongoing jobs.</div>
@@ -173,7 +170,7 @@ export default function Dashboard() {
   }
 
   // SCREEN 2: Secure Employee Login Form Screen
-  if (currentRole === 'employee_login') {
+  if (currentRole === 'employee_login' && !isAuthenticated) {
     return (
       <div style={styles.portalContainer}>
         <div style={styles.loginCard}>
@@ -198,7 +195,7 @@ export default function Dashboard() {
     );
   }
 
-  // SCREEN 3: Active Dashboard (Filtered uniquely based on Authenticated Identity)
+  // SCREEN 3: Active Dashboard View
   return (
     <div style={styles.dashboardContainer}>
       <div style={styles.roleBar}>
@@ -238,7 +235,7 @@ export default function Dashboard() {
               key={emp.id} 
               employee={emp} 
               currentRole={currentRole}
-              tasks={tasks.filter(t => t.assignedTo === emp.id)}
+              tasks={tasks.filter(t => t.assigned_to === emp.id || t.assignedTo === emp.id)}
               moveTask={moveTask} 
               deleteTask={deleteTask} 
               addComment={addComment}
@@ -251,7 +248,7 @@ export default function Dashboard() {
               key={emp.id} 
               employee={emp} 
               currentRole={currentRole}
-              tasks={tasks.filter(t => t.assignedTo === emp.id)}
+              tasks={tasks.filter(t => t.assigned_to === emp.id || t.assignedTo === emp.id)}
               moveTask={moveTask} 
               deleteTask={deleteTask} 
               addComment={addComment}
@@ -273,8 +270,8 @@ const styles = {
   portalTitle: { fontSize: '32px', fontWeight: '800', margin: '0 0 8px 0', background: 'linear-gradient(90deg, #6366f1, #a855f7)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
   portalSubtitle: { color: '#9ca3af', fontSize: '15px', margin: '0 0 40px 0' },
   portalGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' },
-  adminPortalBtn: { padding: '30px', backgroundColor: '#0b0f19', border: '2px solid #312e81', borderRadius: '12px', color: '#fff', cursor: 'pointer', textAlign: 'center', transition: 'transform 0.2s', ':hover': { transform: 'scale(1.02)' } },
-  empPortalBtn: { padding: '30px', backgroundColor: '#0b0f19', border: '2px solid #064e3b', borderRadius: '12px', color: '#fff', cursor: 'pointer', textAlign: 'center', transition: 'transform 0.2s', ':hover': { transform: 'scale(1.02)' } },
+  adminPortalBtn: { padding: '30px', backgroundColor: '#0b0f19', border: '2px solid #312e81', borderRadius: '12px', color: '#fff', cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s', width: '100%' },
+  empPortalBtn: { padding: '30px', backgroundColor: '#0b0f19', border: '2px solid #064e3b', borderRadius: '12px', color: '#fff', cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s', width: '100%' },
   portalBtnTitle: { fontSize: '18px', fontWeight: '700', margin: '15px 0 8px 0' },
   portalBtnDesc: { fontSize: '13px', color: '#9ca3af', lineHeight: '1.5' },
   loginCard: { backgroundColor: '#0b0f19', border: '1px solid #1f2937', padding: '40px', borderRadius: '16px', maxWidth: '400px', width: '100%' },
