@@ -1,25 +1,26 @@
 import os
-from fastapi import FastAPI, HTTPException, Depends
+import datetime
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from pymongo import MongoClient
+from bson import ObjectId
 
 app = FastAPI(title="Project Management System Backend")
 
-# Enable CORS so your Netlify frontend can securely talk to this Render backend
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows your Netlify URL to connect
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# MongoDB Cloud Connection Setup
+# --- DATABASE SETUP ---
 MONGO_URI = os.getenv("MONGO_URI")
 if not MONGO_URI:
-    # Fallback to local if environment variable isn't set yet
     client = MongoClient("mongodb://localhost:27017/")
 else:
     client = MongoClient(MONGO_URI)
@@ -28,7 +29,7 @@ db = client["pms_database"]
 employees_col = db["employees"]
 tasks_col = db["tasks"]
 
-# --- DATA MODELS (SCHEMAS) ---
+# --- DATA MODELS ---
 class Employee(BaseModel):
     id: str
     name: str
@@ -48,24 +49,16 @@ class Task(BaseModel):
     due_date: str
     comments: Optional[List[dict]] = []
 
-# --- ROUTES ---
+# --- ENDPOINTS ---
 
-# 🔐 NEW: The Missing Employee Login Endpoint
 @app.post("/api/employee/login")
 async def employee_login(credentials: LoginRequest):
-    # Search database for a matching ID string (e.g., "101")
     user = employees_col.find_one({"id": credentials.id})
-    
     if not user:
         raise HTTPException(status_code=404, detail="Employee ID Not Found")
-    
-    # Check password. If no custom password field is set, default to their ID
     stored_password = user.get("password", user["id"])
-    
     if credentials.password != stored_password:
         raise HTTPException(status_code=401, detail="Incorrect Security Password")
-    
-    # Return matched employee context to client side
     return {
         "status": "success",
         "employee": {
@@ -77,8 +70,7 @@ async def employee_login(credentials: LoginRequest):
 
 @app.get("/api/employees")
 async def get_employees():
-    emps = list(employees_col.find({}, {"_id": 0}))
-    return emps
+    return list(employees_col.find({}, {"_id": 0}))
 
 @app.post("/api/employees")
 async def add_employee(emp: Employee):
@@ -86,7 +78,6 @@ async def add_employee(emp: Employee):
         raise HTTPException(status_code=400, detail="Employee ID already exists")
     
     emp_dict = emp.dict()
-    # Implicitly set default login password as their assigned ID
     emp_dict["password"] = emp.id
     employees_col.insert_one(emp_dict)
     return {"status": "success", "employee": emp}
@@ -115,22 +106,50 @@ async def add_task(task: Task):
     result = tasks_col.insert_one(task_dict)
     return {"status": "success", "id": str(result.inserted_id)}
 
+# 📩 CloudMailin Email Webhook Target Route
+@app.post("/api/incoming-email")
+async def receive_email_task(request: Request):
+    try:
+        data = await request.json()
+        
+        # Parse data from CloudMailin incoming JSON payload structure
+        headers = data.get("headers", {})
+        subject = headers.get("Subject", "New Task via Email")
+        sender = headers.get("From", "Unknown Sender")
+        email_body = data.get("plain", "No text provided.")
+
+        clean_description = f"--- Mail Forwarded from: {sender} ---\n\n{email_body}"
+
+        # Setup the defaults. Mark it Unassigned so it can be managed inside the dashboard panel later.
+        new_task = {
+            "title": subject,
+            "description": clean_description,
+            "assigned_to": "Unassigned",  
+            "status": "TODO",
+            "priority": "Medium",
+            "due_date": "Pending",
+            "comments": []
+        }
+        
+        result = tasks_col.insert_one(new_task)
+        print(f"📩 Success! Task created via email webhook. ID: {result.inserted_id}")
+        return {"status": "success", "task_id": str(result.inserted_id)}
+    except Exception as e:
+        print(f"❌ Webhook parsing issue: {e}")
+        return {"status": "error", "message": str(e)}
+
 @app.put("/api/tasks/{task_id}")
 async def update_task(task_id: str, updates: dict):
-    from bson import ObjectId
     tasks_col.update_one({"_id": ObjectId(task_id)}, {"$set": updates})
     return {"status": "success"}
 
 @app.delete("/api/tasks/{task_id}")
 async def delete_task(task_id: str):
-    from bson import ObjectId
     tasks_col.delete_one({"_id": ObjectId(task_id)})
     return {"status": "success"}
 
 @app.post("/api/tasks/{task_id}/comments")
 async def add_comment(task_id: str, comment: dict):
-    from bson import ObjectId
-    import datetime
     comment["timestamp"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     tasks_col.update_one({"_id": ObjectId(task_id)}, {"$push": {"comments": comment}})
     return {"status": "success"}
@@ -141,6 +160,5 @@ async def get_metrics():
     total = len(all_tasks)
     completed = len([t for t in all_tasks if t.get("status") == "DONE"])
     critical = len([t for t in all_tasks if t.get("priority") == "High" and t.get("status") != "DONE"])
-    
     rate = round((completed / total) * 100) if total > 0 else 0
     return {"completion_rate": rate, "critical_count": critical}
