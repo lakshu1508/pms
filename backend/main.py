@@ -1,172 +1,147 @@
-from fastapi import FastAPI, HTTPException
+import os
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
-import uuid
-import json
-import os
-from datetime import datetime
+from pymongo import MongoClient
 
-app = FastAPI(title="Persistent Project Management Engine")
+app = FastAPI(title="Project Management System Backend")
 
+# Enable CORS so your Netlify frontend can securely talk to this Render backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allows your Netlify URL to connect
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-DB_FILE = "database.json"
+# MongoDB Cloud Connection Setup
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    # Fallback to local if environment variable isn't set yet
+    client = MongoClient("mongodb://localhost:27017/")
+else:
+    client = MongoClient(MONGO_URI)
 
-# 💾 FILE UTILITIES: Read and Write data directly to your hard drive file
-def load_data():
-    if not os.path.exists(DB_FILE):
-        # Default starter configuration seed data if file doesn't exist yet
-        initial_seed = {
-            "employees": [
-                {"id": "EMP-101", "name": "Sarah Connor", "avatar": "👩‍💻"},
-                {"id": "EMP-102", "name": "Alex Mercer", "avatar": "👨‍💻"},
-                {"id": "EMP-103", "name": "Elena Rostova", "avatar": "👩‍🔬"},
-            ],
-            "tasks": [
-                {
-                    "id": "demo-task-1",
-                    "title": "Database Optimization Sync",
-                    "description": "Index user records and clear stale query cache structures.",
-                    "status": "in-progress",
-                    "assignedTo": "EMP-101",
-                    "priority": "High",
-                    "due_date": "2026-07-15",
-                    "comments": []
-                }
-            ]
-        }
-        save_data(initial_seed)
-        return initial_seed
-    
-    with open(DB_FILE, "r") as f:
-        return json.load(f)
+db = client["pms_database"]
+employees_col = db["employees"]
+tasks_col = db["tasks"]
 
-def save_data(data):
-    with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+# --- DATA MODELS (SCHEMAS) ---
 
-# 📐 Strict Schemas
-class CommentSubmit(BaseModel):
-    author: str
-    text: str
-
-class TaskCreate(BaseModel):
-    title: str
-    description: Optional[str] = ""
-    status: str
-    assignedTo: str
-    priority: str
-    due_date: str
-
-class TaskUpdate(BaseModel):
-    status: str
-
-class EmployeeCreate(BaseModel):
+class Employee(BaseModel):
     id: str
     name: str
     avatar: str
+    password: Optional[str] = None  # New field for custom employee passwords
 
-# 📡 METRICS ENDPOINT
-@app.get("/api/metrics")
-def get_dashboard_metrics():
-    db = load_data()
-    total_tasks = len(db["tasks"])
-    if total_tasks == 0:
-        return {"completion_rate": 0, "critical_count": 0}
-    done_tasks = len([t for t in db["tasks"] if t["status"] == "done"])
-    critical_tasks = len([t for t in db["tasks"] if t["priority"] == "Critical"])
-    return {"completion_rate": round((done_tasks / total_tasks) * 100), "critical_count": critical_tasks}
+class Task(BaseModel):
+    id: str
+    title: str
+    desc: str
+    status: str          # "Pending", "In-Progress", "Done"
+    assigned_to: str     # Matches Employee ID
+    due_date: str
 
-# 📡 EMPLOYEES
-@app.get("/api/employees")
+# Seed database with initial fallback data if completely empty
+if employees_col.count_documents({}) == 0:
+    employees_col.insert_many([
+        {"id": "EMP-101", "name": "Sarah Connor", "avatar": "👩‍💻", "password": "EMP-101"},
+        {"id": "EMP-102", "name": "Alex Mercer", "avatar": "👨‍💻", "password": "EMP-102"},
+        {"id": "EMP-103", "name": "Elena Rostova", "avatar": "👩‍🔬", "password": "EMP-103"},
+    ])
+
+# --- ENDPOINTS ---
+
+# 1. Fetch all employees (Used by Admin to see the master list)
+@app.get("/api/employees", response_model=List[Employee])
 def get_employees():
-    return load_data()["employees"]
+    employees = list(employees_col.find({}, {"_id": 0}))
+    return employees
 
-# 👤 ONBOARD EMPLOYEE
+# 2. Onboard a new employee (Sets password to Employee ID by default)
 @app.post("/api/employees")
-def create_employee(employee: EmployeeCreate):
-    db = load_data()
+def create_employee(employee: Employee):
+    emp_data = employee.dict()
     
-    # Check if ID already exists
-    if any(e["id"] == employee.id.upper().strip() for e in db["employees"]):
+    # If no custom password is supplied, set it to their unique Employee ID
+    if not emp_data.get("password"):
+        emp_data["password"] = emp_data["id"]
+        
+    if employees_col.find_one({"id": emp_data["id"]}):
         raise HTTPException(status_code=400, detail="Employee ID already exists")
         
-    new_emp = {
-        "id": employee.id.upper().strip(),
-        "name": employee.name,
-        "avatar": employee.avatar
-    }
-    db["employees"].append(new_emp)
-    save_data(db)
-    return new_emp
+    employees_col.insert_one(emp_data)
+    return {"status": "success", "message": f"Employee {employee.name} onboarded!"}
 
-# 🗑️ DELETE EMPLOYEE
-@app.delete("/api/employees/{employee_id}")
-def delete_employee(employee_id: str):
-    db = load_data()
-    original_count = len(db["employees"])
-    db["employees"] = [e for e in db["employees"] if e["id"] != employee_id]
-    
-    if len(db["employees"]) == original_count:
+# 3. Offboard/Delete an employee
+@app.delete("/api/employees/{emp_id}")
+def delete_employee(emp_id: str):
+    result = employees_col.delete_one({"id": emp_id})
+    if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Employee not found")
-        
-    save_data(db)
-    return {"message": "Employee deleted successfully"}
+    # Clean up their tasks too
+    tasks_col.delete_many({"assigned_to": emp_id})
+    return {"status": "success", "message": "Employee and their tasks removed"}
 
-# 📡 TASKS & OPERATIONS
-@app.get("/api/tasks")
+# 4. Fetch all tasks (Admin complete view)
+@app.get("/api/tasks", response_model=List[Task])
 def get_tasks():
-    return load_data()["tasks"]
+    return list(tasks_col.find({}, {"_id": 0}))
 
+# 5. Fetch tasks assigned to ONE specific employee (Secure Portal View)
+@app.get("/api/tasks/employee/{emp_id}", response_model=List[Task])
+def get_employee_tasks(emp_id: str):
+    return list(tasks_col.find({"assigned_to": emp_id}, {"_id": 0}))
+
+# 6. Create a brand new task
 @app.post("/api/tasks")
-def create_task(task: TaskCreate):
-    db = load_data()
-    new_task = task.dict()
-    new_task["id"] = str(uuid.uuid4())
-    new_task["comments"] = []
-    db["tasks"].append(new_task)
-    save_data(db)
-    return new_task
+def create_task(task: Task):
+    if tasks_col.find_one({"id": task.id}):
+        raise HTTPException(status_code=400, detail="Task ID already exists")
+    tasks_col.insert_one(task.dict())
+    return {"status": "success", "message": "Task assigned successfully!"}
 
+# 7. Update an ongoing task's status
 @app.put("/api/tasks/{task_id}")
-def update_task(task_id: str, task_update: TaskUpdate):
-    db = load_data()
-    for task in db["tasks"]:
-        if task["id"] == task_id:
-            task["status"] = task_update.status
-            save_data(db)
-            return task
-    raise HTTPException(status_code=404, detail="Task not found")
+def update_task_status(task_id: str, data: dict):
+    new_status = data.get("status")
+    if new_status not in ["Pending", "In-Progress", "Done"]:
+        raise HTTPException(status_code=400, detail="Invalid status type")
+        
+    result = tasks_col.update_one({"id": task_id}, {"$set": {"status": new_status}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"status": "success", "message": "Task status updated"}
 
-@app.post("/api/tasks/{task_id}/comments")
-def add_task_comment(task_id: str, comment: CommentSubmit):
-    db = load_data()
-    for task in db["tasks"]:
-        if task["id"] == task_id:
-            new_comment = {
-                "id": str(uuid.uuid4()),
-                "author": comment.author,
-                "text": comment.text,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
-            }
-            task["comments"].append(new_comment)
-            save_data(db)
-            return task
-    raise HTTPException(status_code=404, detail="Task not found")
+# 8. New: Secure Employee Login Verification
+@app.post("/api/employee/login")
+def employee_login(data: dict):
+    emp_id = data.get("id")
+    password = data.get("password")
+    
+    if not emp_id or not password:
+        raise HTTPException(status_code=400, detail="Missing ID or password")
+        
+    employee = employees_col.find_one({"id": emp_id})
+    
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee ID not found")
+        
+    if employee.get("password") != password:
+        raise HTTPException(status_code=401, detail="Incorrect password")
+        
+    return {
+        "status": "success",
+        "employee": {
+            "id": employee["id"],
+            "name": employee["name"],
+            "avatar": employee["avatar"]
+        }
+    }
 
-@app.delete("/api/tasks/{task_id}")
-def delete_task(task_id: str):
-    db = load_data()
-    initial_count = len(db["tasks"])
-    db["tasks"] = [t for t in db["tasks"] if t["id"] != task_id]
-    if len(db["tasks"]) < initial_count:
-        save_data(db)
-        return {"message": "Success"}
-    raise HTTPException(status_code=404, detail="Task not found")
+# Root Health Check
+@app.get("/")
+def read_root():
+    return {"status": "online", "database": "connected_to_atlas"}
