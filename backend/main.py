@@ -31,12 +31,12 @@ tasks_col = db["tasks"]
 
 # --- DATA MODELS ---
 class Employee(BaseModel):
-    id: str  # This now perfectly supports strings, integers, or mixed text like "IN0336"
+    id: str  # Accepts numbers (123), text (manager), or alphanumeric combinations (IN0336)
     name: str
     avatar: Optional[str] = "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"
 
 class LoginRequest(BaseModel):
-    id: str  # Supports alphanumeric input
+    id: str  
     password: str
 
 class PasswordChangeRequest(BaseModel):
@@ -58,12 +58,14 @@ class Task(BaseModel):
 
 @app.post("/api/employee/login")
 async def employee_login(credentials: LoginRequest):
-    # Search for user using the alphanumeric string ID
-    user = employees_col.find_one({"id": str(credentials.id).strip()})
+    # Ensure whitespaces are stripped out so logins don't fail due to an accidental space
+    clean_id = str(credentials.id).strip()
+    user = employees_col.find_one({"id": clean_id})
+    
     if not user:
         raise HTTPException(status_code=404, detail="Employee ID Not Found")
     
-    # If no password custom field exists yet, default to their alphanumeric ID
+    # Defaults to their ID if they haven't customized their password yet
     stored_password = user.get("password", user["id"])
     if credentials.password != stored_password:
         raise HTTPException(status_code=401, detail="Incorrect Security Password")
@@ -77,10 +79,11 @@ async def employee_login(credentials: LoginRequest):
         }
     }
 
-# 🔐 NEW ENDPOINT: Allows Employees to update their passwords
+# 🔐 Account-Isolated Password Upgrades
 @app.post("/api/employee/change-password")
 async def change_password(req: PasswordChangeRequest):
-    user = employees_col.find_one({"id": str(req.id).strip()})
+    clean_id = str(req.id).strip()
+    user = employees_col.find_one({"id": clean_id})
     if not user:
         raise HTTPException(status_code=404, detail="Employee ID Not Found")
         
@@ -88,8 +91,8 @@ async def change_password(req: PasswordChangeRequest):
     if req.old_password != stored_password:
         raise HTTPException(status_code=401, detail="Current password incorrect")
         
-    # Update password field in MongoDB
-    employees_col.update_one({"id": req.id}, {"$set": {"password": req.new_password}})
+    # Strictly scope the update rule to the verified user's ID
+    employees_col.update_one({"id": clean_id}, {"$set": {"password": req.new_password}})
     return {"status": "success", "message": "Password updated successfully"}
 
 @app.get("/api/employees")
@@ -104,7 +107,7 @@ async def add_employee(emp: Employee):
     
     emp_dict = emp.dict()
     emp_dict["id"] = clean_id
-    emp_dict["password"] = clean_id  # Default password is their alphanumeric ID (e.g., IN0336)
+    emp_dict["password"] = clean_id  # Matches ID format instantly upon generation
     employees_col.insert_one(emp_dict)
     return {"status": "success", "employee": emp_dict}
 
@@ -132,7 +135,7 @@ async def add_task(task: Task):
     result = tasks_col.insert_one(task_dict)
     return {"status": "success", "id": str(result.inserted_id)}
 
-# 📩 Gmail Webhook Target Route (Saved from earlier)
+# 📩 Inbound Gmail Process Webhook (Preserved)
 @app.post("/api/incoming-email")
 async def receive_email_task(request: Request):
     try:
