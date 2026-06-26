@@ -31,13 +31,18 @@ tasks_col = db["tasks"]
 
 # --- DATA MODELS ---
 class Employee(BaseModel):
-    id: str
+    id: str  # This now perfectly supports strings, integers, or mixed text like "IN0336"
     name: str
     avatar: Optional[str] = "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"
 
 class LoginRequest(BaseModel):
-    id: str
+    id: str  # Supports alphanumeric input
     password: str
+
+class PasswordChangeRequest(BaseModel):
+    id: str
+    old_password: str
+    new_password: str
 
 class Task(BaseModel):
     id: Optional[str] = None
@@ -53,12 +58,16 @@ class Task(BaseModel):
 
 @app.post("/api/employee/login")
 async def employee_login(credentials: LoginRequest):
-    user = employees_col.find_one({"id": credentials.id})
+    # Search for user using the alphanumeric string ID
+    user = employees_col.find_one({"id": str(credentials.id).strip()})
     if not user:
         raise HTTPException(status_code=404, detail="Employee ID Not Found")
+    
+    # If no password custom field exists yet, default to their alphanumeric ID
     stored_password = user.get("password", user["id"])
     if credentials.password != stored_password:
         raise HTTPException(status_code=401, detail="Incorrect Security Password")
+    
     return {
         "status": "success",
         "employee": {
@@ -68,19 +77,36 @@ async def employee_login(credentials: LoginRequest):
         }
     }
 
+# 🔐 NEW ENDPOINT: Allows Employees to update their passwords
+@app.post("/api/employee/change-password")
+async def change_password(req: PasswordChangeRequest):
+    user = employees_col.find_one({"id": str(req.id).strip()})
+    if not user:
+        raise HTTPException(status_code=404, detail="Employee ID Not Found")
+        
+    stored_password = user.get("password", user["id"])
+    if req.old_password != stored_password:
+        raise HTTPException(status_code=401, detail="Current password incorrect")
+        
+    # Update password field in MongoDB
+    employees_col.update_one({"id": req.id}, {"$set": {"password": req.new_password}})
+    return {"status": "success", "message": "Password updated successfully"}
+
 @app.get("/api/employees")
 async def get_employees():
     return list(employees_col.find({}, {"_id": 0}))
 
 @app.post("/api/employees")
 async def add_employee(emp: Employee):
-    if employees_col.find_one({"id": emp.id}):
+    clean_id = str(emp.id).strip()
+    if employees_col.find_one({"id": clean_id}):
         raise HTTPException(status_code=400, detail="Employee ID already exists")
     
     emp_dict = emp.dict()
-    emp_dict["password"] = emp.id
+    emp_dict["id"] = clean_id
+    emp_dict["password"] = clean_id  # Default password is their alphanumeric ID (e.g., IN0336)
     employees_col.insert_one(emp_dict)
-    return {"status": "success", "employee": emp}
+    return {"status": "success", "employee": emp_dict}
 
 @app.delete("/api/employees/{emp_id}")
 async def delete_employee(emp_id: str):
@@ -106,20 +132,18 @@ async def add_task(task: Task):
     result = tasks_col.insert_one(task_dict)
     return {"status": "success", "id": str(result.inserted_id)}
 
-# 📩 Secure Google Apps Script Inbound Webhook Endpoint
+# 📩 Gmail Webhook Target Route (Saved from earlier)
 @app.post("/api/incoming-email")
 async def receive_email_task(request: Request):
     try:
         data = await request.json()
-        
-        # Pull data fields structured by our Google Apps Script
-        subject = data.get("subject", "New Task via Email")
-        sender = data.get("from", "Unknown Sender")
+        headers = data.get("headers", {})
+        subject = headers.get("Subject", "New Task via Email")
+        sender = headers.get("From", "Unknown Sender")
         email_body = data.get("body", "No description text provided.")
 
         clean_description = f"--- Created via Father's Mail Inbox (Sender: {sender}) ---\n\n{email_body}"
 
-        # Initialize as unassigned so your father can route it manually later via the UI portal dashboard
         new_task = {
             "title": subject,
             "description": clean_description,
@@ -131,7 +155,6 @@ async def receive_email_task(request: Request):
         }
         
         result = tasks_col.insert_one(new_task)
-        print(f"📩 Success! Task created via Gmail automation. ID: {result.inserted_id}")
         return {"status": "success", "task_id": str(result.inserted_id)}
     except Exception as e:
         print(f"❌ Webhook parsing issue: {e}")
