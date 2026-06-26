@@ -106,21 +106,20 @@ async def add_task(task: Task):
     result = tasks_col.insert_one(task_dict)
     return {"status": "success", "id": str(result.inserted_id)}
 
-# 📩 CloudMailin Email Webhook Target Route
+# 📩 Secure Google Apps Script Inbound Webhook Endpoint
 @app.post("/api/incoming-email")
 async def receive_email_task(request: Request):
     try:
         data = await request.json()
         
-        # Parse data from CloudMailin incoming JSON payload structure
-        headers = data.get("headers", {})
-        subject = headers.get("Subject", "New Task via Email")
-        sender = headers.get("From", "Unknown Sender")
-        email_body = data.get("plain", "No text provided.")
+        # Pull data fields structured by our Google Apps Script
+        subject = data.get("subject", "New Task via Email")
+        sender = data.get("from", "Unknown Sender")
+        email_body = data.get("body", "No description text provided.")
 
-        clean_description = f"--- Mail Forwarded from: {sender} ---\n\n{email_body}"
+        clean_description = f"--- Created via Father's Mail Inbox (Sender: {sender}) ---\n\n{email_body}"
 
-        # Setup the defaults. Mark it Unassigned so it can be managed inside the dashboard panel later.
+        # Initialize as unassigned so your father can route it manually later via the UI portal dashboard
         new_task = {
             "title": subject,
             "description": clean_description,
@@ -132,7 +131,7 @@ async def receive_email_task(request: Request):
         }
         
         result = tasks_col.insert_one(new_task)
-        print(f"📩 Success! Task created via email webhook. ID: {result.inserted_id}")
+        print(f"📩 Success! Task created via Gmail automation. ID: {result.inserted_id}")
         return {"status": "success", "task_id": str(result.inserted_id)}
     except Exception as e:
         print(f"❌ Webhook parsing issue: {e}")
