@@ -64,10 +64,12 @@ export default function Dashboard() {
     e.preventDefault();
     setLoginError('');
     try {
+      const cleanId = loginEmpId.trim(); 
+      
       const response = await fetch(`${API_BASE_URL}/employee/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: loginEmpId.toUpperCase().trim(), password: loginPassword })
+        body: JSON.stringify({ id: cleanId, password: loginPassword.trim() })
       });
       
       const data = await response.json();
@@ -129,7 +131,7 @@ export default function Dashboard() {
   };
 
   const addEmployee = async (name, customId, avatar) => {
-    const formattedId = customId.toUpperCase().trim();
+    const formattedId = customId.trim();
     await fetch(`${API_BASE_URL}/employees`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: formattedId, name, avatar })
@@ -181,7 +183,7 @@ export default function Dashboard() {
           <form onSubmit={handleEmployeeLogin} style={styles.form}>
             <div style={styles.inputGroup}>
               <label style={styles.label}>Employee ID Code</label>
-              <input type="text" placeholder="e.g. EMP-101" value={loginEmpId} onChange={(e) => setLoginEmpId(e.target.value)} style={styles.input} required />
+              <input type="text" placeholder="e.g. 101" value={loginEmpId} onChange={(e) => setLoginEmpId(e.target.value)} style={styles.input} required />
             </div>
             <div style={styles.inputGroup}>
               <label style={styles.label}>Security Password</label>
