@@ -6,6 +6,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 from pymongo import MongoClient
 from bson import ObjectId
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 app = FastAPI(title="Project Management System Backend")
 
@@ -169,3 +171,24 @@ async def receive_email_task(request: Request):
         return {"status": "success", "task_id": str(result.inserted_id)}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+# ==========================================
+# 🌐 FRONTEND STATIC HOISTING RULES (Netlify Bypass)
+# ==========================================
+
+# Check if the folder exists locally before mounting to prevent startup crashes
+if os.path.exists("dist"):
+    # Serve bundled styles/scripts
+    app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
+
+# Redirect all root and web router views straight to your React App layout
+@app.get("/{catchall:path}")
+async def serve_react_app(catchall: str):
+    # Prevent the wild-card from stealing actual backend endpoint failures
+    if catchall.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API route path endpoint completely missing.")
+    
+    if os.path.exists("dist/index.html"):
+        return FileResponse("dist/index.html")
+    
+    return {"message": "Backend running seamlessly. Frontend 'dist' folder not detected yet."}
