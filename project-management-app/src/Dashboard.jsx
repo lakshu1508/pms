@@ -23,6 +23,13 @@ export default function Dashboard() {
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
 
+  // 🔐 Password Change Modal States
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [passError, setPassError] = useState('');
+  const [passSuccess, setPassSuccess] = useState('');
+
   // Master Data States
   const [employees, setEmployees] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -85,6 +92,43 @@ export default function Dashboard() {
       }
     } catch (err) {
       setLoginError('Could not reach backend server.');
+    }
+  };
+
+  // ⚙️ Process Custom Personal Account Password Upgrade Request
+  const handlePasswordChangeSubmit = async (e) => {
+    e.preventDefault();
+    setPassError('');
+    setPassSuccess('');
+
+    if (!oldPassword.trim() || !newPassword.trim()) {
+      setPassError('Please fill in all inputs fields.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/employee/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: loggedInEmployee?.id,
+          old_password: oldPassword.trim(),
+          new_password: newPassword.trim()
+        })
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        setPassSuccess('Password updated securely!');
+        setOldPassword('');
+        setNewPassword('');
+        // Autoclose popup frame context cleanly after 2 seconds
+        setTimeout(() => setIsPasswordModalOpen(false), 2000);
+      } else {
+        setPassError(data.detail || 'Failed to update security keys.');
+      }
+    } catch (err) {
+      setPassError('Error establishing sync link to network server.');
     }
   };
 
@@ -183,7 +227,7 @@ export default function Dashboard() {
           <form onSubmit={handleEmployeeLogin} style={styles.form}>
             <div style={styles.inputGroup}>
               <label style={styles.label}>Employee ID Code</label>
-              <input type="text" placeholder="e.g. 101" value={loginEmpId} onChange={(e) => setLoginEmpId(e.target.value)} style={styles.input} required />
+              <input type="text" placeholder="e.g. IN0336" value={loginEmpId} onChange={(e) => setLoginEmpId(e.target.value)} style={styles.input} required />
             </div>
             <div style={styles.inputGroup}>
               <label style={styles.label}>Security Password</label>
@@ -205,7 +249,19 @@ export default function Dashboard() {
         <span style={styles.statusBadge}>
           {currentRole === 'admin' ? '👑 SYSTEM ADMINISTRATOR' : `🛠️ PRIVACY ISOLATED WORKSPACE (${loggedInEmployee?.id})`}
         </span>
-        <button style={styles.logoutBtn} onClick={handleLogout}>🚪 Sign Out</button>
+        
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '10px', alignItems: 'center' }}>
+          {/* ⚙️ CHANGE PASSWORD BUTTON: visible strictly to an authenticated employee session */}
+          {currentRole === 'employee' && (
+            <button 
+              style={styles.settingsBtn} 
+              onClick={() => { setIsPasswordModalOpen(true); setPassError(''); setPassSuccess(''); }}
+            >
+              ⚙️ Change Password
+            </button>
+          )}
+          <button style={styles.logoutBtn} onClick={handleLogout}>🚪 Sign Out</button>
+        </div>
       </div>
 
       {currentRole === 'admin' && (
@@ -260,6 +316,57 @@ export default function Dashboard() {
         )}
       </div>
 
+      {/* 🔹 SECURITY MODAL POPUP */}
+      {isPasswordModalOpen && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modalCard}>
+            <h3 style={styles.modalTitleText}>⚙️ Update Profile Password</h3>
+            <p style={styles.modalSubtitleText}>Change your custom private login access key keys safely.</p>
+            
+            <form onSubmit={handlePasswordChangeSubmit} style={styles.form}>
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Current Security Password</label>
+                <input 
+                  type="password" 
+                  placeholder="Enter current password" 
+                  value={oldPassword} 
+                  onChange={(e) => setOldPassword(e.target.value)} 
+                  style={styles.input} 
+                  required 
+                />
+              </div>
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>New Custom Password</label>
+                <input 
+                  type="password" 
+                  placeholder="Enter unique new password" 
+                  value={newPassword} 
+                  onChange={(e) => setNewPassword(e.target.value)} 
+                  style={styles.input} 
+                  required 
+                />
+              </div>
+
+              {passError && <div style={styles.errorBanner}>❌ {passError}</div>}
+              {passSuccess && <div style={styles.successBanner}>✅ {passSuccess}</div>}
+
+              <div style={styles.modalActions}>
+                <button 
+                  type="button" 
+                  style={styles.cancelBtn} 
+                  onClick={() => setIsPasswordModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" style={styles.savePasswordBtn}>
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {isTaskModalOpen && <AddTaskModal employees={employees} onSave={addTask} onClose={() => setIsTaskModalOpen(false)} />}
       {isEmpModalOpen && <AddEmployeeModal onSave={addEmployee} onClose={() => setIsEmpModalOpen(false)} />}
     </div>
@@ -284,11 +391,13 @@ const styles = {
   input: { padding: '12px', backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', color: '#fff', fontSize: '14px' },
   loginSubmitBtn: { padding: '12px', backgroundColor: '#6366f1', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', marginTop: '10px' },
   errorBanner: { padding: '10px', backgroundColor: '#7f1d1d', border: '1px solid #f87171', color: '#fca5a5', borderRadius: '6px', fontSize: '13px' },
+  successBanner: { padding: '10px', backgroundColor: '#064e3b', border: '1px solid #34d399', color: '#a7f3d0', borderRadius: '6px', fontSize: '13px' },
   dashboardContainer: { padding: '40px', fontFamily: '"Inter", sans-serif', backgroundColor: '#0b0f19', color: '#f3f4f6', minHeight: '100vh' },
   roleBar: { display: 'flex', gap: '15px', alignItems: 'center', backgroundColor: '#111827', padding: '12px 20px', borderRadius: '8px', border: '1px solid #1f2937', marginBottom: '30px' },
   roleLabel: { fontSize: '13px', color: '#9ca3af', fontWeight: '500' },
   statusBadge: { fontSize: '12px', fontWeight: '700', color: '#38bdf8', letterSpacing: '0.5px' },
-  logoutBtn: { marginLeft: 'auto', padding: '6px 12px', backgroundColor: '#1f2937', color: '#f3f4f6', border: '1px solid #374151', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' },
+  settingsBtn: { padding: '6px 12px', backgroundColor: 'transparent', color: '#9ca3af', border: '1px solid #374151', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', transition: '0.2s' },
+  logoutBtn: { padding: '6px 12px', backgroundColor: '#1f2937', color: '#f3f4f6', border: '1px solid #374151', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' },
   metricsBar: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '15px', marginBottom: '30px' },
   metricCard: { backgroundColor: '#111827', border: '1px solid #1f2937', padding: '15px', borderRadius: '8px', fontSize: '14px', textAlign: 'center' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px', borderBottom: '1px solid #1f2937', paddingBottom: '24px' },
@@ -297,5 +406,14 @@ const styles = {
   btnGroup: { display: 'flex', gap: '12px' },
   addButton: { padding: '10px 20px', backgroundColor: '#6366f1', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' },
   secondaryButton: { padding: '10px 20px', backgroundColor: '#1f2937', color: '#f3f4f6', border: '1px solid #374151', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' },
-  listContainer: { display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1200px', margin: '0 auto' }
+  listContainer: { display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1200px', margin: '0 auto' },
+  
+  // Modal Style Sheets
+  modalOverlay: { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
+  modalCard: { backgroundColor: '#0b0f19', border: '1px solid #1f2937', padding: '30px', borderRadius: '16px', maxWidth: '400px', width: '100%' },
+  modalTitleText: { fontSize: '20px', fontWeight: '700', margin: '0 0 4px 0', color: '#fff' },
+  modalSubtitleText: { color: '#9ca3af', fontSize: '13px', margin: '0 0 20px 0' },
+  modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '10px' },
+  cancelBtn: { padding: '10px 16px', backgroundColor: '#1f2937', color: '#fff', border: '1px solid #374151', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: '600' },
+  savePasswordBtn: { padding: '10px 16px', backgroundColor: '#6366f1', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: '600' }
 };
