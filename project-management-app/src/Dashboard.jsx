@@ -1,168 +1,287 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import EmployeeRow from './EmployeeRow';
+import AddTaskModal from './AddTaskModal';
+import AddEmployeeModal from './AddEmployeeModal';
 
-export default function Dashboard({ tasks, employees, metrics, onAddTask, onUpdateStatus }) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [assignee, setAssignee] = useState('Unassigned');
-  const [priority, setPriority] = useState('Medium');
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!title.trim()) return;
+export default function Dashboard() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentRole, setCurrentRole] = useState(null); // 'admin' or 'employee'
+  const [loggedInEmployee, setLoggedInEmployee] = useState(null); // Holds the authed employee details
+  
+  // Login Form States
+  const [loginEmpId, setLoginEmpId] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
 
-    onAddTask({
-      title,
-      description,
-      assigned_to: assignee,
-      priority,
-      due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-    });
+  // Master Data States
+  const [employees, setEmployees] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [metrics, setMetrics] = useState({ completion_rate: 0, critical_count: 0 });
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+  const [isEmpModalOpen, setIsEmpModalOpen] = useState(false);
 
-    setTitle('');
-    setDescription('');
-    setAssignee('Unassigned');
-    setPriority('Medium');
+  const fetchAllData = async () => {
+    try {
+      fetch(`${API_BASE_URL}/tasks`).then(res => res.json()).then(setTasks);
+      fetch(`${API_BASE_URL}/metrics`).then(res => res.json()).then(setMetrics);
+      fetch(`${API_BASE_URL}/employees`).then(res => res.json()).then(setEmployees);
+    } catch (err) {
+      console.error("Sync error:", err);
+    }
   };
 
-  return (
-    <div style={{ minHeight: '100vh', background: '#f1f5f9', fontFamily: 'system-ui, sans-serif', padding: '24px', boxSizing: 'border-box' }}>
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchAllData();
+    }
+  }, [isAuthenticated]);
+
+  // Handle Selection Screen
+  const selectAdminRole = () => {
+    const pinInput = prompt('🛡️ Enter Admin Passkey PIN:');
+    if (pinInput === '1234') {
+      setCurrentRole('admin');
+      setIsAuthenticated(true);
+    } else if (pinInput !== null) {
+      alert('❌ Access Denied!');
+    }
+  };
+
+  // Handle Employee Login Request
+  const handleEmployeeLogin = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/employee/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: loginEmpId.toUpperCase().trim(), password: loginPassword })
+      });
       
-      {/* Premium Dashboard Metrics Header */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#ffffff', padding: '20px 32px', borderRadius: '16px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)', marginBottom: '24px' }}>
+      const data = await response.json();
+      if (response.ok) {
+        setLoggedInEmployee(data.employee);
+        setCurrentRole('employee');
+        setIsAuthenticated(true);
+      } else {
+        setLoginError(data.detail || 'Invalid Login Details');
+      }
+    } catch (err) {
+      setLoginError('Could not reach backend server.');
+    }
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    setCurrentRole(null);
+    setLoggedInEmployee(null);
+    setLoginEmpId('');
+    setLoginPassword('');
+    setLoginError('');
+  };
+
+  // --- CRUD OPERATIONS ---
+  const moveTask = async (taskId, newStatus) => {
+    await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus })
+    });
+    fetchAllData();
+  };
+
+  const addTask = async (title, description, assignedTo, status, priority, due_date) => {
+    await fetch(`${API_BASE_URL}/tasks`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, description, assignedTo, status, priority, due_date })
+    });
+    setIsTaskModalOpen(false);
+    fetchAllData();
+  };
+
+  const deleteTask = async (taskId) => {
+    await fetch(`${API_BASE_URL}/tasks/${taskId}`, { method: 'DELETE' });
+    fetchAllData();
+  };
+
+  const addComment = async (taskId, text) => {
+    const author = currentRole === 'admin' ? "👑 Administrator" : `🛠️ ${loggedInEmployee?.name || 'Team Member'}`;
+    await fetch(`${API_BASE_URL}/tasks/${taskId}/comments`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ author, text })
+    });
+    fetchAllData();
+  };
+
+  const addEmployee = async (name, customId, avatar) => {
+    const formattedId = customId.toUpperCase().trim();
+    await fetch(`${API_BASE_URL}/employees`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: formattedId, name, avatar })
+    });
+    setIsEmpModalOpen(false);
+    fetchAllData();
+  };
+
+  const deleteEmployee = async (employeeId) => {
+    await fetch(`${API_BASE_URL}/employees/${employeeId}`, { method: 'DELETE' });
+    fetchAllData();
+  };
+
+  // --- RENDERING VIEWS ---
+
+  // SCREEN 1: Welcome / Role Selection Portal Screen
+  if (!currentRole) {
+    return (
+      <div style={styles.portalContainer}>
+        <div style={styles.portalCard}>
+          <h1 style={styles.portalTitle}>Business Management Suite</h1>
+          <p style={styles.portalSubtitle}>Please select your clearance path to continue</p>
+          <div style={styles.portalGrid}>
+            <button style={styles.adminPortalBtn} onClick={selectAdminRole}>
+              <div style={{ fontSize: '40px' }}>👑</div>
+              <div style={styles.portalBtnTitle}>Admin Portal</div>
+              <div style={styles.portalBtnDesc}>Manage staff, distribute tasks, view company performance analytics.</div>
+            </button>
+            <button style={styles.empPortalBtn} onClick={() => setCurrentRole('employee_login')}>
+              <div style={{ fontSize: '40px' }}>🛠️</div>
+              <div style={styles.portalBtnTitle}>Employee Portal</div>
+              <div style={styles.portalBtnDesc}>Access your personal private workspace and manage ongoing jobs.</div>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // SCREEN 2: Secure Employee Login Form Screen
+  if (currentRole === 'employee_login') {
+    return (
+      <div style={styles.portalContainer}>
+        <div style={styles.loginCard}>
+          <button style={styles.backLink} onClick={() => setCurrentRole(null)}>⬅️ Back to Portal Selection</button>
+          <h2 style={{ ...styles.portalTitle, fontSize: '24px', marginTop: '15px' }}>Employee Log In</h2>
+          <p style={{ ...styles.portalSubtitle, marginBottom: '25px' }}>Enter your credentials to securely retrieve your task sheet.</p>
+          
+          <form onSubmit={handleEmployeeLogin} style={styles.form}>
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Employee ID Code</label>
+              <input type="text" placeholder="e.g. EMP-101" value={loginEmpId} onChange={(e) => setLoginEmpId(e.target.value)} style={styles.input} required />
+            </div>
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Security Password</label>
+              <input type="password" placeholder="Defaults to Employee ID if unset" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} style={styles.input} required />
+            </div>
+            {loginError && <div style={styles.errorBanner}>⚠️ {loginError}</div>}
+            <button type="submit" style={styles.loginSubmitBtn}>Verify Credentials & Enter</button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // SCREEN 3: Active Dashboard (Filtered uniquely based on Authenticated Identity)
+  return (
+    <div style={styles.dashboardContainer}>
+      <div style={styles.roleBar}>
+        <span style={styles.roleLabel}>🔐 Authenticated Context:</span>
+        <span style={styles.statusBadge}>
+          {currentRole === 'admin' ? '👑 SYSTEM ADMINISTRATOR' : `🛠️ PRIVACY ISOLATED WORKSPACE (${loggedInEmployee?.id})`}
+        </span>
+        <button style={styles.logoutBtn} onClick={handleLogout}>🚪 Sign Out</button>
+      </div>
+
+      {currentRole === 'admin' && (
+        <div style={styles.metricsBar}>
+          <div style={styles.metricCard}>💻 Velocity: <strong>{metrics.completion_rate}% Done</strong></div>
+          <div style={{...styles.metricCard, color: metrics.critical_count > 0 ? '#ef4444' : '#f3f4f6'}}>🚨 Critical Actions: <strong>{metrics.critical_count} Open</strong></div>
+        </div>
+      )}
+
+      <header style={styles.header}>
         <div>
-          <h1 style={{ margin: 0, fontSize: '1.75rem', color: '#0f172a', fontWeight: '700' }}>Project Management Studio</h1>
-          <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '0.95rem' }}>Modular Side-By-Side Visual Controller</p>
+          <h1 style={styles.title}>Project Management Portal</h1>
+          <p style={styles.subtitle}>
+            Welcome back, <strong>{currentRole === 'admin' ? 'Administrator' : loggedInEmployee?.name}</strong>
+          </p>
         </div>
-        
-        <div style={{ display: 'flex', gap: '20px' }}>
-          <div style={{ background: '#f0fdf4', padding: '12px 20px', borderRadius: '12px', border: '1px solid #bbf7d0', textAlign: 'center', minWidth: '130px' }}>
-            <span style={{ display: 'block', fontSize: '0.75rem', color: '#166534', fontWeight: '700', letterSpacing: '0.05em' }}>COMPLETION RATE</span>
-            <span style={{ fontSize: '1.6rem', fontWeight: '800', color: '#15803d' }}>{metrics.completion_rate}%</span>
+        {currentRole === 'admin' && (
+          <div style={styles.btnGroup}>
+            <button style={styles.secondaryButton} onClick={() => setIsEmpModalOpen(true)}>👤 Onboard Employee</button>
+            <button style={styles.addButton} onClick={() => setIsTaskModalOpen(true)}>⚡ Assign Priority Task</button>
           </div>
-          <div style={{ background: '#fef2f2', padding: '12px 20px', borderRadius: '12px', border: '1px solid #fee2e2', textAlign: 'center', minWidth: '130px' }}>
-            <span style={{ display: 'block', fontSize: '0.75rem', color: '#991b1b', fontWeight: '700', letterSpacing: '0.05em' }}>CRITICAL BLOCKS</span>
-            <span style={{ fontSize: '1.6rem', fontWeight: '800', color: '#b91c1c' }}>{metrics.critical_count} Tasks</span>
-          </div>
-        </div>
+        )}
       </header>
 
-      {/* Side-by-Side Functional Grid System */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '24px', alignItems: 'start' }}>
-        
-        {/* Left Side Action Control Board */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          
-          {/* Add Task Registry Form Card */}
-          <section style={{ background: '#ffffff', padding: '24px', borderRadius: '16px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)' }}>
-            <h2 style={{ margin: '0 0 18px 0', fontSize: '1.2rem', color: '#1e293b', fontWeight: '600' }}>Register New Task</h2>
-            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Task Title</label>
-                <input type="text" value={title} onChange={e => setTitle(e.target.value)} required placeholder="Required objective summary..." style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.95rem' }} />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Context Description</label>
-                <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Provide action tracking details..." rows={3} style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.95rem', resize: 'none' }} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Assignee</label>
-                  <select value={assignee} onChange={e => setAssignee(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '0.9rem' }}>
-                    <option value="Unassigned">Unassigned</option>
-                    {employees.map(emp => (
-                      <option key={emp.id} value={emp.name}>{emp.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: '#475569' }}>Priority Tier</label>
-                  <select value={priority} onChange={e => setPriority(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '0.9rem' }}>
-                    <option value="Low">Low</option>
-                    <option value="Medium">Medium</option>
-                    <option value="High">High</option>
-                  </select>
-                </div>
-              </div>
-              <button type="submit" style={{ marginTop: '8px', padding: '12px', borderRadius: '8px', border: 'none', background: '#2563eb', color: '#ffffff', fontWeight: '600', cursor: 'pointer', fontSize: '0.95rem' }}>Deploy Task Card</button>
-            </form>
-          </section>
-
-          {/* Connected Team Directory List */}
-          <section style={{ background: '#ffffff', padding: '24px', borderRadius: '16px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)' }}>
-            <h2 style={{ margin: '0 0 14px 0', fontSize: '1.2rem', color: '#1e293b', fontWeight: '600' }}>Personnel Roster</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {employees.map(emp => (
-                <div key={emp.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #f1f5f9' }}>
-                  <span style={{ fontSize: '1.4rem' }}>{emp.avatar || '👤'}</span>
-                  <div>
-                    <h4 style={{ margin: 0, fontSize: '0.95rem', color: '#0f172a', fontWeight: '600' }}>{emp.name}</h4>
-                    <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontFamily: 'monospace' }}>{emp.id}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-
-        {/* Right Side Task Monitoring Panel */}
-        <main style={{ background: '#ffffff', padding: '24px', borderRadius: '16px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)', minHeight: '520px' }}>
-          <h2 style={{ margin: '0 0 20px 0', fontSize: '1.25rem', color: '#1e293b', fontWeight: '600' }}>Active Task Stream</h2>
-          
-          {tasks.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '80px 0', color: '#94a3b8' }}>
-              <p style={{ margin: 0, fontSize: '1rem' }}>No task cards registered in system state clusters.</p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {tasks.map(task => {
-                const cleanStatus = String(task.status).toUpperCase().replace('-', '_');
-                const isDone = cleanStatus === 'DONE';
-                const isHigh = task.priority === 'High';
-                
-                return (
-                  <div key={task.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px', borderRadius: '12px', border: '1px solid #e2e8f0', background: isDone ? '#f8fafc' : '#ffffff', opacity: isDone ? 0.75 : 1 }}>
-                    <div style={{ flex: 1, paddingRight: '16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px', flexWrap: 'wrap' }}>
-                        <span style={{ padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: '700', background: isHigh ? '#fef2f2' : '#f1f5f9', color: isHigh ? '#991b1b' : '#475569' }}>
-                          {task.priority}
-                        </span>
-                        <h3 style={{ margin: 0, fontSize: '1.05rem', color: isDone ? '#64748b' : '#0f172a', textDecoration: isDone ? 'line-through' : 'none', fontWeight: '600' }}>
-                          {task.title}
-                        </h3>
-                      </div>
-                      <p style={{ margin: '0 0 8px 0', color: '#64748b', fontSize: '0.9rem', lineHeight: '1.4' }}>{task.description}</p>
-                      <div style={{ display: 'flex', gap: '16px', fontSize: '0.8rem', color: '#94a3b8' }}>
-                        <span>Operator: <strong style={{ color: '#475569' }}>{task.assigned_to}</strong></span>
-                        <span>Target Due: <strong style={{ color: '#475569' }}>{task.due_date}</strong></span>
-                      </div>
-                    </div>
-
-                    {/* Interactive State Mutation Badge Toggle */}
-                    <button 
-                      onClick={() => onUpdateStatus(task.id, cleanStatus)}
-                      style={{
-                        padding: '10px 14px',
-                        borderRadius: '8px',
-                        border: '1px solid',
-                        fontSize: '0.8rem',
-                        fontWeight: '700',
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                        background: isDone ? '#e2e8f0' : cleanStatus === 'IN_PROGRESS' ? '#dbeafe' : '#f1f5f9',
-                        borderColor: isDone ? '#cbd5e1' : cleanStatus === 'IN_PROGRESS' ? '#bfdbfe' : '#e2e8f0',
-                        color: isDone ? '#475569' : cleanStatus === 'IN_PROGRESS' ? '#1e40af' : '#334155'
-                      }}
-                    >
-                      {cleanStatus.replace('_', ' ')}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </main>
+      <div style={styles.listContainer}>
+        {currentRole === 'admin' ? (
+          // Admin View: Maps all registered staff rows
+          employees.map(emp => (
+            <EmployeeRow 
+              key={emp.id} 
+              employee={emp} 
+              currentRole={currentRole}
+              tasks={tasks.filter(t => t.assignedTo === emp.id)}
+              moveTask={moveTask} 
+              deleteTask={deleteTask} 
+              addComment={addComment}
+              onDelete={() => deleteEmployee(emp.id)}
+            />
+          ))
+        ) : (
+          // Employee View: Maps ONLY their own card context safely
+          employees.filter(emp => emp.id === loggedInEmployee?.id).map(emp => (
+            <EmployeeRow 
+              key={emp.id} 
+              employee={emp} 
+              currentRole={currentRole}
+              tasks={tasks.filter(t => t.assignedTo === emp.id)}
+              moveTask={moveTask} 
+              deleteTask={deleteTask} 
+              addComment={addComment}
+              onDelete={null} // Employees can never self-delete
+            />
+          ))
+        )}
       </div>
+
+      {isTaskModalOpen && <AddTaskModal employees={employees} onSave={addTask} onClose={() => setIsTaskModalOpen(false)} />}
+      {isEmpModalOpen && <AddEmployeeModal onSave={addEmployee} onClose={() => setIsEmpModalOpen(false)} />}
     </div>
   );
 }
 
+const styles = {
+  portalContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', backgroundColor: '#05070f', fontFamily: '"Inter", sans-serif', padding: '20px' },
+  portalCard: { maxWidth: '800px', width: '100%', textAlign: 'center' },
+  portalTitle: { fontSize: '32px', fontWeight: '800', margin: '0 0 8px 0', background: 'linear-gradient(90deg, #6366f1, #a855f7)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  portalSubtitle: { color: '#9ca3af', fontSize: '15px', margin: '0 0 40px 0' },
+  portalGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' },
+  adminPortalBtn: { padding: '30px', backgroundColor: '#0b0f19', border: '2px solid #312e81', borderRadius: '12px', color: '#fff', cursor: 'pointer', textAlign: 'center', transition: 'transform 0.2s', ':hover': { transform: 'scale(1.02)' } },
+  empPortalBtn: { padding: '30px', backgroundColor: '#0b0f19', border: '2px solid #064e3b', borderRadius: '12px', color: '#fff', cursor: 'pointer', textAlign: 'center', transition: 'transform 0.2s', ':hover': { transform: 'scale(1.02)' } },
+  portalBtnTitle: { fontSize: '18px', fontWeight: '700', margin: '15px 0 8px 0' },
+  portalBtnDesc: { fontSize: '13px', color: '#9ca3af', lineHeight: '1.5' },
+  loginCard: { backgroundColor: '#0b0f19', border: '1px solid #1f2937', padding: '40px', borderRadius: '16px', maxWidth: '400px', width: '100%' },
+  backLink: { background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', fontSize: '13px', padding: 0, fontWeight: '500' },
+  form: { display: 'flex', flexDirection: 'column', gap: '20px' },
+  inputGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  label: { fontSize: '12px', color: '#9ca3af', fontWeight: '600', textTransform: 'uppercase' },
+  input: { padding: '12px', backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', color: '#fff', fontSize: '14px' },
+  loginSubmitBtn: { padding: '12px', backgroundColor: '#6366f1', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', marginTop: '10px' },
+  errorBanner: { padding: '10px', backgroundColor: '#7f1d1d', border: '1px solid #f87171', color: '#fca5a5', borderRadius: '6px', fontSize: '13px' },
+  dashboardContainer: { padding: '40px', fontFamily: '"Inter", sans-serif', backgroundColor: '#0b0f19', color: '#f3f4f6', minHeight: '100vh' },
+  roleBar: { display: 'flex', gap: '15px', alignItems: 'center', backgroundColor: '#111827', padding: '12px 20px', borderRadius: '8px', border: '1px solid #1f2937', marginBottom: '30px' },
+  roleLabel: { fontSize: '13px', color: '#9ca3af', fontWeight: '500' },
+  statusBadge: { fontSize: '12px', fontWeight: '700', color: '#38bdf8', letterSpacing: '0.5px' },
+  logoutBtn: { marginLeft: 'auto', padding: '6px 12px', backgroundColor: '#1f2937', color: '#f3f4f6', border: '1px solid #374151', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' },
+  metricsBar: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '15px', marginBottom: '30px' },
+  metricCard: { backgroundColor: '#111827', border: '1px solid #1f2937', padding: '15px', borderRadius: '8px', fontSize: '14px', textAlign: 'center' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px', borderBottom: '1px solid #1f2937', paddingBottom: '24px' },
+  title: { fontSize: '28px', fontWeight: '700', margin: 0, background: 'linear-gradient(90deg, #6366f1, #a855f7)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  subtitle: { color: '#9ca3af', margin: '4px 0 0 0', fontSize: '14px' },
+  btnGroup: { display: 'flex', gap: '12px' },
+  addButton: { padding: '10px 20px', backgroundColor: '#6366f1', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' },
+  secondaryButton: { padding: '10px 20px', backgroundColor: '#1f2937', color: '#f3f4f6', border: '1px solid #374151', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' },
+  listContainer: { display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1200px', margin: '0 auto' }
+};
