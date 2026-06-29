@@ -6,17 +6,9 @@ import AddEmployeeModal from './AddEmployeeModal';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export default function Dashboard() {
-  // Initialize states directly from localStorage so refreshes don't wipe them
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem('isAuthenticated') === 'true';
-  });
-  const [currentRole, setCurrentRole] = useState(() => {
-    return localStorage.getItem('currentRole') || null;
-  });
-  const [loggedInEmployee, setLoggedInEmployee] = useState(() => {
-    const savedEmp = localStorage.getItem('loggedInEmployee');
-    return savedEmp ? JSON.parse(savedEmp) : null;
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentRole, setCurrentRole] = useState(null); // 'admin' or 'employee'
+  const [loggedInEmployee, setLoggedInEmployee] = useState(null); // Holds the authed employee details
   
   // Login Form States
   const [loginEmpId, setLoginEmpId] = useState('');
@@ -52,8 +44,6 @@ export default function Dashboard() {
     if (pinInput === '1234') {
       setCurrentRole('admin');
       setIsAuthenticated(true);
-      localStorage.setItem('isAuthenticated', 'true');
-      localStorage.setItem('currentRole', 'admin');
     } else if (pinInput !== null) {
       alert('❌ Access Denied!');
     }
@@ -64,12 +54,10 @@ export default function Dashboard() {
     e.preventDefault();
     setLoginError('');
     try {
-      const cleanId = loginEmpId.trim(); 
-      
       const response = await fetch(`${API_BASE_URL}/employee/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: cleanId, password: loginPassword.trim() })
+        body: JSON.stringify({ id: loginEmpId.toUpperCase().trim(), password: loginPassword })
       });
       
       const data = await response.json();
@@ -77,9 +65,6 @@ export default function Dashboard() {
         setLoggedInEmployee(data.employee);
         setCurrentRole('employee');
         setIsAuthenticated(true);
-        localStorage.setItem('isAuthenticated', 'true');
-        localStorage.setItem('currentRole', 'employee');
-        localStorage.setItem('loggedInEmployee', JSON.stringify(data.employee));
       } else {
         setLoginError(data.detail || 'Invalid Login Details');
       }
@@ -95,7 +80,6 @@ export default function Dashboard() {
     setLoginEmpId('');
     setLoginPassword('');
     setLoginError('');
-    localStorage.clear();
   };
 
   // --- CRUD OPERATIONS ---
@@ -110,7 +94,7 @@ export default function Dashboard() {
   const addTask = async (title, description, assignedTo, status, priority, due_date) => {
     await fetch(`${API_BASE_URL}/tasks`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, description, assigned_to: assignedTo, status, priority, due_date })
+      body: JSON.stringify({ title, description, assignedTo, status, priority, due_date })
     });
     setIsTaskModalOpen(false);
     fetchAllData();
@@ -131,7 +115,7 @@ export default function Dashboard() {
   };
 
   const addEmployee = async (name, customId, avatar) => {
-    const formattedId = customId.trim();
+    const formattedId = customId.toUpperCase().trim();
     await fetch(`${API_BASE_URL}/employees`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: formattedId, name, avatar })
@@ -148,7 +132,7 @@ export default function Dashboard() {
   // --- RENDERING VIEWS ---
 
   // SCREEN 1: Welcome / Role Selection Portal Screen
-  if (!isAuthenticated && currentRole !== 'employee_login') {
+  if (!currentRole) {
     return (
       <div style={styles.portalContainer}>
         <div style={styles.portalCard}>
@@ -172,7 +156,7 @@ export default function Dashboard() {
   }
 
   // SCREEN 2: Secure Employee Login Form Screen
-  if (currentRole === 'employee_login' && !isAuthenticated) {
+  if (currentRole === 'employee_login') {
     return (
       <div style={styles.portalContainer}>
         <div style={styles.loginCard}>
@@ -183,7 +167,7 @@ export default function Dashboard() {
           <form onSubmit={handleEmployeeLogin} style={styles.form}>
             <div style={styles.inputGroup}>
               <label style={styles.label}>Employee ID Code</label>
-              <input type="text" placeholder="e.g. 101" value={loginEmpId} onChange={(e) => setLoginEmpId(e.target.value)} style={styles.input} required />
+              <input type="text" placeholder="e.g. EMP-101" value={loginEmpId} onChange={(e) => setLoginEmpId(e.target.value)} style={styles.input} required />
             </div>
             <div style={styles.inputGroup}>
               <label style={styles.label}>Security Password</label>
@@ -197,7 +181,7 @@ export default function Dashboard() {
     );
   }
 
-  // SCREEN 3: Active Dashboard View
+  // SCREEN 3: Active Dashboard (Filtered uniquely based on Authenticated Identity)
   return (
     <div style={styles.dashboardContainer}>
       <div style={styles.roleBar}>
@@ -232,12 +216,13 @@ export default function Dashboard() {
 
       <div style={styles.listContainer}>
         {currentRole === 'admin' ? (
+          // Admin View: Maps all registered staff rows
           employees.map(emp => (
             <EmployeeRow 
               key={emp.id} 
               employee={emp} 
               currentRole={currentRole}
-              tasks={tasks.filter(t => t.assigned_to === emp.id || t.assignedTo === emp.id)}
+              tasks={tasks.filter(t => t.assignedTo === emp.id)}
               moveTask={moveTask} 
               deleteTask={deleteTask} 
               addComment={addComment}
@@ -245,16 +230,17 @@ export default function Dashboard() {
             />
           ))
         ) : (
+          // Employee View: Maps ONLY their own card context safely
           employees.filter(emp => emp.id === loggedInEmployee?.id).map(emp => (
             <EmployeeRow 
               key={emp.id} 
               employee={emp} 
               currentRole={currentRole}
-              tasks={tasks.filter(t => t.assigned_to === emp.id || t.assignedTo === emp.id)}
+              tasks={tasks.filter(t => t.assignedTo === emp.id)}
               moveTask={moveTask} 
               deleteTask={deleteTask} 
               addComment={addComment}
-              onDelete={null}
+              onDelete={null} // Employees can never self-delete
             />
           ))
         )}
@@ -272,8 +258,8 @@ const styles = {
   portalTitle: { fontSize: '32px', fontWeight: '800', margin: '0 0 8px 0', background: 'linear-gradient(90deg, #6366f1, #a855f7)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
   portalSubtitle: { color: '#9ca3af', fontSize: '15px', margin: '0 0 40px 0' },
   portalGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' },
-  adminPortalBtn: { padding: '30px', backgroundColor: '#0b0f19', border: '2px solid #312e81', borderRadius: '12px', color: '#fff', cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s', width: '100%' },
-  empPortalBtn: { padding: '30px', backgroundColor: '#0b0f19', border: '2px solid #064e3b', borderRadius: '12px', color: '#fff', cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s', width: '100%' },
+  adminPortalBtn: { padding: '30px', backgroundColor: '#0b0f19', border: '2px solid #312e81', borderRadius: '12px', color: '#fff', cursor: 'pointer', textAlign: 'center', transition: 'transform 0.2s', ':hover': { transform: 'scale(1.02)' } },
+  empPortalBtn: { padding: '30px', backgroundColor: '#0b0f19', border: '2px solid #064e3b', borderRadius: '12px', color: '#fff', cursor: 'pointer', textAlign: 'center', transition: 'transform 0.2s', ':hover': { transform: 'scale(1.02)' } },
   portalBtnTitle: { fontSize: '18px', fontWeight: '700', margin: '15px 0 8px 0' },
   portalBtnDesc: { fontSize: '13px', color: '#9ca3af', lineHeight: '1.5' },
   loginCard: { backgroundColor: '#0b0f19', border: '1px solid #1f2937', padding: '40px', borderRadius: '16px', maxWidth: '400px', width: '100%' },
