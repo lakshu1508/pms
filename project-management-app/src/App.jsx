@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import Dashboard from './components/Dashboard';
+import Dashboard from './Dashboard';
 
 // Dynamically handles local development port overrides and production hosting context
 const API_BASE = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
