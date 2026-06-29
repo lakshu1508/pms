@@ -1,25 +1,26 @@
 import os
-from fastapi import FastAPI, HTTPException, Depends
+import datetime
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from pymongo import MongoClient
+from bson import ObjectId
 
 app = FastAPI(title="Project Management System Backend")
 
-# Enable CORS so your Netlify frontend can securely talk to this Render backend
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows your Netlify URL to connect
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# MongoDB Cloud Connection Setup
+# --- DATABASE SETUP ---
 MONGO_URI = os.getenv("MONGO_URI")
 if not MONGO_URI:
-    # Fallback to local if environment variable isn't set yet
     client = MongoClient("mongodb://localhost:27017/")
 else:
     client = MongoClient(MONGO_URI)
@@ -28,120 +29,161 @@ db = client["pms_database"]
 employees_col = db["employees"]
 tasks_col = db["tasks"]
 
-# --- DATA MODELS (SCHEMAS) ---
-
+# --- DATA MODELS ---
 class Employee(BaseModel):
-    id: str
+    id: str  # Accepts numbers (123), text (manager), or alphanumeric combinations (IN0336)
     name: str
-    avatar: str
-    password: Optional[str] = None  # New field for custom employee passwords
+    avatar: Optional[str] = "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"
+
+class LoginRequest(BaseModel):
+    id: str  
+    password: str
+
+class PasswordChangeRequest(BaseModel):
+    id: str
+    old_password: str
+    new_password: str
 
 class Task(BaseModel):
-    id: str
+    id: Optional[str] = None
     title: str
-    desc: str
-    status: str          # "Pending", "In-Progress", "Done"
-    assigned_to: str     # Matches Employee ID
+    description: str
+    assigned_to: str
+    status: str
+    priority: str
     due_date: str
-
-# Seed database with initial fallback data if completely empty
-if employees_col.count_documents({}) == 0:
-    employees_col.insert_many([
-        {"id": "EMP-101", "name": "Sarah Connor", "avatar": "👩‍💻", "password": "EMP-101"},
-        {"id": "EMP-102", "name": "Alex Mercer", "avatar": "👨‍💻", "password": "EMP-102"},
-        {"id": "EMP-103", "name": "Elena Rostova", "avatar": "👩‍🔬", "password": "EMP-103"},
-    ])
+    comments: Optional[List[dict]] = []
 
 # --- ENDPOINTS ---
 
-# 1. Fetch all employees (Used by Admin to see the master list)
-@app.get("/api/employees", response_model=List[Employee])
-def get_employees():
-    employees = list(employees_col.find({}, {"_id": 0}))
-    return employees
-
-# 2. Onboard a new employee (Sets password to Employee ID by default)
-@app.post("/api/employees")
-def create_employee(employee: Employee):
-    emp_data = employee.dict()
-    
-    # If no custom password is supplied, set it to their unique Employee ID
-    if not emp_data.get("password"):
-        emp_data["password"] = emp_data["id"]
-        
-    if employees_col.find_one({"id": emp_data["id"]}):
-        raise HTTPException(status_code=400, detail="Employee ID already exists")
-        
-    employees_col.insert_one(emp_data)
-    return {"status": "success", "message": f"Employee {employee.name} onboarded!"}
-
-# 3. Offboard/Delete an employee
-@app.delete("/api/employees/{emp_id}")
-def delete_employee(emp_id: str):
-    result = employees_col.delete_one({"id": emp_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    # Clean up their tasks too
-    tasks_col.delete_many({"assigned_to": emp_id})
-    return {"status": "success", "message": "Employee and their tasks removed"}
-
-# 4. Fetch all tasks (Admin complete view)
-@app.get("/api/tasks", response_model=List[Task])
-def get_tasks():
-    return list(tasks_col.find({}, {"_id": 0}))
-
-# 5. Fetch tasks assigned to ONE specific employee (Secure Portal View)
-@app.get("/api/tasks/employee/{emp_id}", response_model=List[Task])
-def get_employee_tasks(emp_id: str):
-    return list(tasks_col.find({"assigned_to": emp_id}, {"_id": 0}))
-
-# 6. Create a brand new task
-@app.post("/api/tasks")
-def create_task(task: Task):
-    if tasks_col.find_one({"id": task.id}):
-        raise HTTPException(status_code=400, detail="Task ID already exists")
-    tasks_col.insert_one(task.dict())
-    return {"status": "success", "message": "Task assigned successfully!"}
-
-# 7. Update an ongoing task's status
-@app.put("/api/tasks/{task_id}")
-def update_task_status(task_id: str, data: dict):
-    new_status = data.get("status")
-    if new_status not in ["Pending", "In-Progress", "Done"]:
-        raise HTTPException(status_code=400, detail="Invalid status type")
-        
-    result = tasks_col.update_one({"id": task_id}, {"$set": {"status": new_status}})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return {"status": "success", "message": "Task status updated"}
-
-# 8. New: Secure Employee Login Verification
 @app.post("/api/employee/login")
-def employee_login(data: dict):
-    emp_id = data.get("id")
-    password = data.get("password")
+async def employee_login(credentials: LoginRequest):
+    # Ensure whitespaces are stripped out so logins don't fail due to an accidental space
+    clean_id = str(credentials.id).strip()
+    user = employees_col.find_one({"id": clean_id})
     
-    if not emp_id or not password:
-        raise HTTPException(status_code=400, detail="Missing ID or password")
-        
-    employee = employees_col.find_one({"id": emp_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="Employee ID Not Found")
     
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee ID not found")
-        
-    if employee.get("password") != password:
-        raise HTTPException(status_code=401, detail="Incorrect password")
-        
+    # Defaults to their ID if they haven't customized their password yet
+    stored_password = user.get("password", user["id"])
+    if credentials.password != stored_password:
+        raise HTTPException(status_code=401, detail="Incorrect Security Password")
+    
     return {
         "status": "success",
         "employee": {
-            "id": employee["id"],
-            "name": employee["name"],
-            "avatar": employee["avatar"]
+            "id": user["id"],
+            "name": user["name"],
+            "avatar": user.get("avatar", "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix")
         }
     }
 
-# Root Health Check
-@app.get("/")
-def read_root():
-    return {"status": "online", "database": "connected_to_atlas"}
+# 🔐 Account-Isolated Password Upgrades
+@app.post("/api/employee/change-password")
+async def change_password(req: PasswordChangeRequest):
+    clean_id = str(req.id).strip()
+    user = employees_col.find_one({"id": clean_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="Employee ID Not Found")
+        
+    stored_password = user.get("password", user["id"])
+    if req.old_password != stored_password:
+        raise HTTPException(status_code=401, detail="Current password incorrect")
+        
+    # Strictly scope the update rule to the verified user's ID
+    employees_col.update_one({"id": clean_id}, {"$set": {"password": req.new_password}})
+    return {"status": "success", "message": "Password updated successfully"}
+
+@app.get("/api/employees")
+async def get_employees():
+    return list(employees_col.find({}, {"_id": 0}))
+
+@app.post("/api/employees")
+async def add_employee(emp: Employee):
+    clean_id = str(emp.id).strip()
+    if employees_col.find_one({"id": clean_id}):
+        raise HTTPException(status_code=400, detail="Employee ID already exists")
+    
+    emp_dict = emp.dict()
+    emp_dict["id"] = clean_id
+    emp_dict["password"] = clean_id  # Matches ID format instantly upon generation
+    employees_col.insert_one(emp_dict)
+    return {"status": "success", "employee": emp_dict}
+
+@app.delete("/api/employees/{emp_id}")
+async def delete_employee(emp_id: str):
+    employees_col.delete_one({"id": emp_id})
+    tasks_col.delete_many({"assigned_to": emp_id})
+    return {"status": "success"}
+
+@app.get("/api/tasks")
+async def get_tasks():
+    raw_tasks = list(tasks_col.find({}))
+    processed = []
+    for t in raw_tasks:
+        t["id"] = str(t["_id"])
+        del t["_id"]
+        processed.append(t)
+    return processed
+
+@app.post("/api/tasks")
+async def add_task(task: Task):
+    task_dict = task.dict()
+    if "id" in task_dict:
+        del task_dict["id"]
+    result = tasks_col.insert_one(task_dict)
+    return {"status": "success", "id": str(result.inserted_id)}
+
+# 📩 Inbound Gmail Process Webhook (Preserved)
+@app.post("/api/incoming-email")
+async def receive_email_task(request: Request):
+    try:
+        data = await request.json()
+        headers = data.get("headers", {})
+        subject = headers.get("Subject", "New Task via Email")
+        sender = headers.get("From", "Unknown Sender")
+        email_body = data.get("body", "No description text provided.")
+
+        clean_description = f"--- Created via Father's Mail Inbox (Sender: {sender}) ---\n\n{email_body}"
+
+        new_task = {
+            "title": subject,
+            "description": clean_description,
+            "assigned_to": "Unassigned",  
+            "status": "TODO",
+            "priority": "Medium",
+            "due_date": "Pending",
+            "comments": []
+        }
+        
+        result = tasks_col.insert_one(new_task)
+        return {"status": "success", "task_id": str(result.inserted_id)}
+    except Exception as e:
+        print(f"❌ Webhook parsing issue: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.put("/api/tasks/{task_id}")
+async def update_task(task_id: str, updates: dict):
+    tasks_col.update_one({"_id": ObjectId(task_id)}, {"$set": updates})
+    return {"status": "success"}
+
+@app.delete("/api/tasks/{task_id}")
+async def delete_task(task_id: str):
+    tasks_col.delete_one({"_id": ObjectId(task_id)})
+    return {"status": "success"}
+
+@app.post("/api/tasks/{task_id}/comments")
+async def add_comment(task_id: str, comment: dict):
+    comment["timestamp"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    tasks_col.update_one({"_id": ObjectId(task_id)}, {"$push": {"comments": comment}})
+    return {"status": "success"}
+
+@app.get("/api/metrics")
+async def get_metrics():
+    all_tasks = list(tasks_col.find({}))
+    total = len(all_tasks)
+    completed = len([t for t in all_tasks if t.get("status") == "DONE"])
+    critical = len([t for t in all_tasks if t.get("priority") == "High" and t.get("status") != "DONE"])
+    rate = round((completed / total) * 100) if total > 0 else 0
+    return {"completion_rate": rate, "critical_count": critical}
