@@ -6,12 +6,9 @@ from pydantic import BaseModel
 from typing import List, Optional
 from pymongo import MongoClient
 from bson import ObjectId
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 
 app = FastAPI(title="Project Management System Backend")
 
-# Enable CORS so your modular components can securely talk to this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,15 +28,20 @@ db = client["pms_database"]
 employees_col = db["employees"]
 tasks_col = db["tasks"]
 
-# --- DATA MODELS (SCHEMAS) ---
+# --- DATA MODELS ---
 class Employee(BaseModel):
-    id: str
+    id: str  
     name: str
     avatar: Optional[str] = "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"
 
 class LoginRequest(BaseModel):
-    id: str
+    id: str  
     password: str
+
+class PasswordChangeRequest(BaseModel):
+    id: str
+    old_password: str
+    new_password: str
 
 class Task(BaseModel):
     id: Optional[str] = None
@@ -51,28 +53,32 @@ class Task(BaseModel):
     due_date: str
     comments: Optional[List[dict]] = []
 
-# --- ROUTES ---
+# --- ENDPOINTS ---
 
 @app.post("/api/employee/login")
 async def employee_login(credentials: LoginRequest):
     clean_id = str(credentials.id).strip()
     user = employees_col.find_one({"id": clean_id})
-    
     if not user:
         raise HTTPException(status_code=404, detail="Employee ID Not Found")
-    
     stored_password = user.get("password", user["id"])
     if credentials.password != stored_password:
         raise HTTPException(status_code=401, detail="Incorrect Security Password")
-    
     return {
         "status": "success",
-        "employee": {
-            "id": user["id"],
-            "name": user["name"],
-            "avatar": user.get("avatar", "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix")
-        }
+        "employee": { "id": user["id"], "name": user["name"], "avatar": user.get("avatar") }
     }
+
+@app.post("/api/employee/change-password")
+async def change_password(req: PasswordChangeRequest):
+    clean_id = str(req.id).strip()
+    user = employees_col.find_one({"id": clean_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="Employee ID Not Found")
+    if req.old_password != user.get("password", user["id"]):
+        raise HTTPException(status_code=401, detail="Current password incorrect")
+    employees_col.update_one({"id": clean_id}, {"$set": {"password": req.new_password}})
+    return {"status": "success"}
 
 @app.get("/api/employees")
 async def get_employees():
@@ -83,12 +89,11 @@ async def add_employee(emp: Employee):
     clean_id = str(emp.id).strip()
     if employees_col.find_one({"id": clean_id}):
         raise HTTPException(status_code=400, detail="Employee ID already exists")
-    
     emp_dict = emp.dict()
     emp_dict["id"] = clean_id
-    emp_dict["password"] = clean_id  # Implicitly set default login password as assigned ID
+    emp_dict["password"] = clean_id  
     employees_col.insert_one(emp_dict)
-    return {"status": "success", "employee": emp}
+    return {"status": "success", "employee": emp_dict}
 
 @app.delete("/api/employees/{emp_id}")
 async def delete_employee(emp_id: str):
@@ -103,9 +108,9 @@ async def get_tasks():
     for t in raw_tasks:
         t["id"] = str(t["_id"])
         del t["_id"]
-        # Small Change Fix: Normalize status mapping to uppercase safe configurations
+        # Safeguard fallback to uppercase strings
         if "status" in t:
-            t["status"] = str(t["status"]).upper().replace("-", "_")
+            t["status"] = str(t["status"]).upper()
         processed.append(t)
     return processed
 
@@ -114,16 +119,15 @@ async def add_task(task: Task):
     task_dict = task.dict()
     if "id" in task_dict:
         del task_dict["id"]
-    # Small Change Fix: Forces uppercase status entry to maintain storage integrity
-    task_dict["status"] = str(task_dict.get("status", "TODO")).upper().replace("-", "_")
+    task_dict["status"] = str(task_dict.get("status", "TODO")).upper()
     result = tasks_col.insert_one(task_dict)
     return {"status": "success", "id": str(result.inserted_id)}
 
 @app.put("/api/tasks/{task_id}")
 async def update_task(task_id: str, updates: dict):
-    # Small Change Fix: Catches tracking toggles and maps status values correctly to UPPERCASE
+    # Automatically cast incoming status fields to UPPERCASE before database commits
     if "status" in updates:
-        updates["status"] = str(updates["status"]).upper().replace("-", "_")
+        updates["status"] = str(updates["status"]).upper()
     tasks_col.update_one({"_id": ObjectId(task_id)}, {"$set": updates})
     return {"status": "success"}
 
@@ -142,29 +146,26 @@ async def add_comment(task_id: str, comment: dict):
 async def get_metrics():
     all_tasks = list(tasks_col.find({}))
     total = len(all_tasks)
-    
-    # Small Change Fix: Capitalization-proof tracking safeguards
-    completed = len([t for t in all_tasks if str(t.get("status")).upper() in ["DONE", "COMPLETED"]])
-    critical = len([t for t in all_tasks if str(t.get("priority")).upper() == "HIGH" and str(t.get("status")).upper() not in ["DONE", "COMPLETED"]])
-    
+    # Checks for clean, exact capitalization uppercase targets
+    completed = len([t for t in all_tasks if str(t.get("status")).upper() == "DONE"])
+    critical = len([t for t in all_tasks if str(t.get("priority")).upper() == "HIGH" and str(t.get("status")).upper() != "DONE"])
     rate = round((completed / total) * 100) if total > 0 else 0
     return {"completion_rate": rate, "critical_count": critical}
 
-# ==========================================
-# 🌐 FRONTEND STATIC HOISTING RULES (Local Delivery Engine)
-# ==========================================
-
-# Mount bundled React visual production assets if the dist folder is found locally
-if os.path.exists("dist"):
-    app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
-
-# Fallback catchall mapping routing to redirect web requests straight to the single-page layout entry
-@app.get("/{catchall:path}")
-async def serve_react_app(catchall: str):
-    if catchall.startswith("api/"):
-        raise HTTPException(status_code=404, detail="API route path completely missing.")
-    
-    if os.path.exists("dist/index.html"):
-        return FileResponse("dist/index.html")
-    
-    return {"message": "Backend engine operational. Ready for 'dist' production assets compilation."}
+# 📩 Inbound Gmail Webhook Target Route
+@app.post("/api/incoming-email")
+async def receive_email_task(request: Request):
+    try:
+        data = await request.json()
+        subject = data.get("subject", "New Task via Email")
+        sender = data.get("from", "Unknown Sender")
+        email_body = data.get("body", "No description text provided.")
+        clean_description = f"--- Created via Father's Mail Inbox (Sender: {sender}) ---\n\n{email_body}"
+        new_task = {
+            "title": subject, "description": clean_description, "assigned_to": "Unassigned",  
+            "status": "TODO", "priority": "Medium", "due_date": "Pending", "comments": []
+        }
+        result = tasks_col.insert_one(new_task)
+        return {"status": "success", "task_id": str(result.inserted_id)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
