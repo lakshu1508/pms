@@ -165,3 +165,4 @@ export default function Dashboard({ tasks, employees, metrics, onAddTask, onUpda
     </div>
   );
 }
+
